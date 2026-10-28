@@ -1,0 +1,26 @@
+{
+  "name": "dsk-visual-engine-root",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSK Visuel Engine - Reusable visual page builder and template engine for SaaS applications",
+  "packageManager": "pnpm@12.15.0",
+  "scripts": {
+    "build": "pnpm -r --filter=\"./packages/*\" build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml}\"",
+    "typecheck": "pnpm -r --filter=\"./packages/*\" typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "@types/node": "^22.10.1",
+    "eslint": "^9.16.0",
+    "prettier": "^3.4.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}
