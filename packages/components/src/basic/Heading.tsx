@@ -18,8 +18,9 @@ export const HeadingPropsSchema = z.object({
 });
 
 export type HeadingProps = z.infer<typeof HeadingPropsSchema>;
+export type HeadingInputProps = z.input<typeof HeadingPropsSchema>;
 
-export const Heading: React.FC<RenderComponentProps<HeadingProps>> = ({
+export const Heading: React.FC<RenderComponentProps<HeadingInputProps>> = ({
   props,
   style,
 }) => {

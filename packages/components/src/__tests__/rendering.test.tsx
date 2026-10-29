@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { PageRenderer } from '@dsk/react-renderer';
 import { PageDocumentSchema, CURRENT_SCHEMA_VERSION } from '@dsk/core';
 import { defaultRendererRegistry } from '../defaultRegistry';
+import { Button } from '../basic/Button';
 
 describe('Component Rendering via PageRenderer', () => {
   const makeDoc = (children: unknown[]) =>
@@ -64,6 +65,39 @@ describe('Component Rendering via PageRenderer', () => {
     expect(el.getAttribute('href')).toBe('https://shop.example.com');
   });
 
+  it('should render Button with rel="noopener noreferrer" when target="_blank"', () => {
+    const doc = makeDoc([
+      {
+        id: 'btn-blank',
+        type: 'core/button',
+        props: { label: 'External Link', url: 'https://external.example.com', target: '_blank' },
+      },
+    ]);
+
+    render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
+
+    const el = screen.getByText('External Link');
+    expect(el.tagName).toBe('A');
+    expect(el.getAttribute('target')).toBe('_blank');
+    expect(el.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('should render Button as link with valid hash anchor', () => {
+    const doc = makeDoc([
+      {
+        id: 'btn-anchor',
+        type: 'core/button',
+        props: { label: 'Jump to Section', url: '#pricing-table' },
+      },
+    ]);
+
+    render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
+
+    const el = screen.getByText('Jump to Section');
+    expect(el.tagName).toBe('A');
+    expect(el.getAttribute('href')).toBe('#pricing-table');
+  });
+
   it('should render Button as <button> when url is missing', () => {
     const doc = makeDoc([
       { id: 'btn-no-url', type: 'core/button', props: { label: 'Click Me' } },
@@ -74,24 +108,44 @@ describe('Component Rendering via PageRenderer', () => {
     const el = screen.getByText('Click Me');
     expect(el.tagName).toBe('BUTTON');
     expect(el.getAttribute('type')).toBe('button');
+    expect(el.hasAttribute('disabled')).toBe(false);
   });
 
-  it('should sanitize dangerous urls in Button props', () => {
+  it('should NEVER convert a dangerous URL into an active link or active button', () => {
     const doc = makeDoc([
       {
         id: 'btn-xss',
         type: 'core/button',
-        props: { label: 'Evil', url: 'javascript:alert(1)' },
+        props: { label: 'Malicious Button', url: 'javascript:alert(1)' },
       },
     ]);
 
     render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
 
-    const el = screen.getByText('Evil');
-    // sanitizePropsUrls replaces the url to '#', then isSafeUrl('#') is true
-    // but Button's own isSafeUrl check catches javascript: before sanitization
-    // Either way, the href must not be javascript:
-    expect(el.getAttribute('href') || '').not.toContain('javascript');
+    const el = screen.getByText('Malicious Button');
+    // Security check: Must render as a disabled button, never an active <a> or active button
+    expect(el.tagName).toBe('BUTTON');
+    expect(el.getAttribute('href')).toBeNull();
+    expect(el.hasAttribute('disabled')).toBe(true);
+    expect(el.getAttribute('aria-disabled')).toBe('true');
+    expect(el.getAttribute('data-dsk-unsafe-url')).toBe('true');
+  });
+
+  it('should render Button as disabled even when invoked directly with malicious URL (defense-in-depth)', () => {
+    render(
+      <Button
+        id="btn-direct-xss"
+        type="core/button"
+        props={{ label: 'Direct Attack', url: 'javascript:alert(document.cookie)' }}
+      />,
+    );
+
+    const el = screen.getByText('Direct Attack');
+    expect(el.tagName).toBe('BUTTON');
+    expect(el.hasAttribute('disabled')).toBe(true);
+    expect(el.getAttribute('aria-disabled')).toBe('true');
+    expect(el.getAttribute('data-dsk-unsafe-url')).toBe('true');
+    expect(el.getAttribute('href')).toBeNull();
   });
 
   it('should render Image with safe src', () => {
@@ -114,6 +168,24 @@ describe('Component Rendering via PageRenderer', () => {
     expect(img?.getAttribute('loading')).toBe('lazy');
   });
 
+  it('should render Image with safe data:image URL', () => {
+    const doc = makeDoc([
+      {
+        id: 'img-data',
+        type: 'core/image',
+        props: { src: 'data:image/png;base64,iVBORw0KGgo...', alt: 'Inline base64 image' },
+      },
+    ]);
+
+    const { container } = render(
+      <PageRenderer document={doc} registry={defaultRendererRegistry} />,
+    );
+
+    const img = container.querySelector('img[data-dsk-component="core/image"]');
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo...');
+  });
+
   it('should render Image placeholder when src is empty', () => {
     const doc = makeDoc([
       { id: 'img-empty', type: 'core/image', props: { alt: 'Missing image' } },
@@ -133,14 +205,29 @@ describe('Component Rendering via PageRenderer', () => {
       },
     ]);
 
-    render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
-
-    // Should show placeholder, not an img with javascript: src
     const { container } = render(
       <PageRenderer document={doc} registry={defaultRendererRegistry} />,
     );
     const img = container.querySelector('img[data-dsk-component="core/image"]');
     expect(img).toBeNull();
+    expect(screen.getByText('Bad image')).toBeDefined();
+  });
+
+  it('should render Image placeholder when src is protocol-relative // URL', () => {
+    const doc = makeDoc([
+      {
+        id: 'img-proto-rel',
+        type: 'core/image',
+        props: { src: '//evil.com/phish.jpg', alt: 'Protocol relative' },
+      },
+    ]);
+
+    const { container } = render(
+      <PageRenderer document={doc} registry={defaultRendererRegistry} />,
+    );
+    const img = container.querySelector('img[data-dsk-component="core/image"]');
+    expect(img).toBeNull();
+    expect(screen.getByText('Protocol relative')).toBeDefined();
   });
 
   it('should render Container with children', () => {
@@ -165,7 +252,7 @@ describe('Component Rendering via PageRenderer', () => {
     expect(containerEl).not.toBeNull();
   });
 
-  it('should render Grid with children', () => {
+  it('should render Grid with children and WITHOUT unnecessary role="grid"', () => {
     const doc = makeDoc([
       {
         id: 'grid-1',
@@ -189,6 +276,8 @@ describe('Component Rendering via PageRenderer', () => {
     const gridEl = container.querySelector<HTMLElement>('[data-dsk-component="core/grid"]');
     expect(gridEl).not.toBeNull();
     expect(gridEl?.style.display).toBe('grid');
+    // Accessibility check: Pure CSS layout grid must NOT have role="grid"
+    expect(gridEl?.getAttribute('role')).toBeNull();
   });
 
   it('should render a full storefront-like page with multiple component types', () => {

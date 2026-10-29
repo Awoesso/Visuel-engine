@@ -11,6 +11,7 @@ export const GridPropsSchema = z.object({
 });
 
 export type GridProps = z.infer<typeof GridPropsSchema>;
+export type GridInputProps = z.input<typeof GridPropsSchema>;
 
 const GAP_MAP: Record<string, string> = {
   none: '0',
@@ -20,7 +21,7 @@ const GAP_MAP: Record<string, string> = {
   xl: 'var(--dsk-spacing-xl, 32px)',
 };
 
-export const Grid: React.FC<RenderComponentProps<GridProps>> = ({
+export const Grid: React.FC<RenderComponentProps<GridInputProps>> = ({
   props,
   style,
   children,
@@ -34,7 +35,6 @@ export const Grid: React.FC<RenderComponentProps<GridProps>> = ({
   return (
     <div
       data-dsk-component="core/grid"
-      role="grid"
       style={{
         display: 'grid',
         gridTemplateColumns: templateColumns,

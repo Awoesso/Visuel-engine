@@ -13,6 +13,7 @@ export const TextPropsSchema = z.object({
 });
 
 export type TextProps = z.infer<typeof TextPropsSchema>;
+export type TextInputProps = z.input<typeof TextPropsSchema>;
 
 const FONT_SIZE_MAP: Record<string, string> = {
   xs: '0.75rem',
@@ -36,7 +37,7 @@ const LINE_HEIGHT_MAP: Record<string, string> = {
   relaxed: '1.75',
 };
 
-export const Text: React.FC<RenderComponentProps<TextProps>> = ({
+export const Text: React.FC<RenderComponentProps<TextInputProps>> = ({
   props,
   style,
 }) => {

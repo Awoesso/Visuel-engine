@@ -6,6 +6,7 @@ import type { RenderComponentProps } from '@dsk/react-renderer';
 export const ButtonPropsSchema = z.object({
   label: z.string().min(1, 'Button label is required').default('Button'),
   url: z.string().optional(),
+  target: z.enum(['_self', '_blank']).default('_self'),
   variant: z.enum(['primary', 'secondary', 'outline', 'ghost']).default('primary'),
   size: z.enum(['sm', 'md', 'lg']).default('md'),
   fullWidth: z.boolean().default(false),
@@ -14,6 +15,7 @@ export const ButtonPropsSchema = z.object({
 });
 
 export type ButtonProps = z.infer<typeof ButtonPropsSchema>;
+export type ButtonInputProps = z.input<typeof ButtonPropsSchema>;
 
 const VARIANT_STYLES: Record<string, React.CSSProperties> = {
   primary: {
@@ -44,14 +46,11 @@ const SIZE_STYLES: Record<string, React.CSSProperties> = {
   lg: { padding: '14px 28px', fontSize: '1.125rem' },
 };
 
-export const Button: React.FC<RenderComponentProps<ButtonProps>> = ({
+export const Button: React.FC<RenderComponentProps<ButtonInputProps>> = ({
   props,
   style,
 }) => {
   const safeProps = ButtonPropsSchema.parse(props || {});
-
-  const safeUrl =
-    safeProps.url && isSafeUrl(safeProps.url) ? safeProps.url : undefined;
 
   const combinedStyle: React.CSSProperties = {
     display: 'inline-flex',
@@ -71,19 +70,60 @@ export const Button: React.FC<RenderComponentProps<ButtonProps>> = ({
     ...style,
   };
 
-  if (safeUrl && !safeProps.disabled) {
+  // 1. If a URL is configured, inspect its safety
+  if (safeProps.url !== undefined && safeProps.url.trim() !== '') {
+    const rawUrl = safeProps.url.trim();
+    // '#' alone is considered unsafe/placeholder, but hash anchors like '#contact' are allowed
+    const isDangerous =
+      rawUrl === '#' ||
+      !isSafeUrl(rawUrl) ||
+      rawUrl.toLowerCase().startsWith('javascript:') ||
+      rawUrl.toLowerCase().startsWith('vbscript:');
+
+    // SECURITY GUARANTEE: Never convert an unsafe or malicious URL into an active clickable button or link
+    if (isDangerous) {
+      return (
+        <button
+          type="button"
+          data-dsk-component="core/button"
+          data-dsk-unsafe-url="true"
+          disabled={true}
+          aria-disabled="true"
+          aria-label={safeProps.ariaLabel || safeProps.label}
+          style={{
+            ...combinedStyle,
+            cursor: 'not-allowed',
+            opacity: 0.5,
+          }}
+        >
+          {safeProps.label}
+        </button>
+      );
+    }
+
+    // Safe URL link
+    const isBlank = safeProps.target === '_blank';
     return (
       <a
-        href={safeUrl}
+        href={rawUrl}
+        target={safeProps.target}
+        rel={isBlank ? 'noopener noreferrer' : undefined}
         data-dsk-component="core/button"
         aria-label={safeProps.ariaLabel || safeProps.label}
-        style={combinedStyle}
+        aria-disabled={safeProps.disabled ? 'true' : undefined}
+        style={{
+          ...combinedStyle,
+          ...(safeProps.disabled
+            ? { pointerEvents: 'none', cursor: 'not-allowed', opacity: 0.5 }
+            : {}),
+        }}
       >
         {safeProps.label}
       </a>
     );
   }
 
+  // 2. Standard action button without URL
   return (
     <button
       type="button"
@@ -106,6 +146,7 @@ export const buttonDefinition: ComponentDefinition<ButtonProps> = {
   propsSchema: ButtonPropsSchema,
   defaultProps: {
     label: 'Button',
+    target: '_self',
     variant: 'primary',
     size: 'md',
     fullWidth: false,
@@ -122,6 +163,15 @@ export const buttonDefinition: ComponentDefinition<ButtonProps> = {
       label: 'Lien (URL)',
       description: 'Si défini, le bouton se comporte comme un lien hypertexte',
       category: 'content',
+    },
+    target: {
+      type: 'select',
+      label: 'Cible du lien',
+      category: 'content',
+      options: [
+        { label: 'Même fenêtre (_self)', value: '_self' },
+        { label: 'Nouvel onglet (_blank)', value: '_blank' },
+      ],
     },
     variant: {
       type: 'select',

@@ -7,46 +7,59 @@ export const SECURITY_LIMITS = {
   MAX_SECTIONS: 100,
 } as const;
 
-const DANGEROUS_URL_PROTOCOLS = ['javascript:', 'vbscript:', 'data:text/html'];
-
 /**
  * Checks if a given URL is safe to render in href or src attributes.
- * Rejects dangerous URI schemes such as javascript:, vbscript:, data:text/html.
+ * Uses a positive allowlist of safe protocols (http, https, mailto, tel, safe data:image/)
+ * and relative URLs, while strictly rejecting evasion techniques, control characters,
+ * protocol-relative URLs (//), and dangerous schemes (javascript:, vbscript:, etc.).
  */
 export function isSafeUrl(url: string | undefined | null): boolean {
   if (!url) return true;
-  const trimmed = url.trim().toLowerCase();
+  const trimmed = url.trim();
+  if (!trimmed) return true;
 
-  // Relative URLs, anchor links, mailto and tel are safe
+  // Clean URL by stripping internal whitespace and control characters for scheme inspection
+  // eslint-disable-next-line no-control-regex
+  const clean = trimmed.replace(/[\u0000-\u001F\u007F-\u009F\s]+/g, '').toLowerCase();
+
+  // Reject null bytes, encoded null bytes, and HTML entity escapes
+  if (clean.includes('\0') || clean.includes('%00') || clean.includes('&#')) {
+    return false;
+  }
+
+  // Reject protocol-relative URLs (//attacker.com) to prevent open redirect vectors
+  if (clean.startsWith('//')) {
+    return false;
+  }
+
+  // Safe relative paths and internal hash anchors
   if (
-    trimmed.startsWith('/') ||
-    trimmed.startsWith('#') ||
-    trimmed.startsWith('mailto:') ||
-    trimmed.startsWith('tel:') ||
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://')
+    clean.startsWith('/') ||
+    clean.startsWith('./') ||
+    clean.startsWith('../') ||
+    clean.startsWith('#')
   ) {
     return true;
   }
 
-  // Check dangerous protocols
-  for (const protocol of DANGEROUS_URL_PROTOCOLS) {
-    if (trimmed.startsWith(protocol)) {
-      return false;
-    }
+  // Safe data: URLs (images only)
+  if (clean.startsWith('data:')) {
+    return clean.startsWith('data:image/');
   }
 
-  // Disallow general data: URLs unless safe images
-  if (trimmed.startsWith('data:')) {
-    return trimmed.startsWith('data:image/');
-  }
-
-  // Reject anything containing null bytes or encoded javascript:
-  if (trimmed.includes('\0') || trimmed.includes('&#')) {
+  // Parse absolute URLs and enforce strict protocol allowlist
+  try {
+    const parsed = new URL(trimmed);
+    const protocol = parsed.protocol.toLowerCase();
+    return (
+      protocol === 'http:' ||
+      protocol === 'https:' ||
+      protocol === 'mailto:' ||
+      protocol === 'tel:'
+    );
+  } catch {
     return false;
   }
-
-  return true;
 }
 
 /**

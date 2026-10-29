@@ -87,9 +87,16 @@ describe('Props Schemas — defaults and validation', () => {
   it('ButtonPropsSchema applies correct defaults', () => {
     const parsed = ButtonPropsSchema.parse({});
     expect(parsed.label).toBe('Button');
+    expect(parsed.target).toBe('_self');
     expect(parsed.variant).toBe('primary');
     expect(parsed.size).toBe('md');
     expect(parsed.disabled).toBe(false);
+  });
+
+  it('ButtonPropsSchema rejects invalid properties', () => {
+    expect(ButtonPropsSchema.safeParse({ label: '' }).success).toBe(false);
+    expect(ButtonPropsSchema.safeParse({ variant: 'super-primary' }).success).toBe(false);
+    expect(ButtonPropsSchema.safeParse({ target: '_parent' }).success).toBe(false);
   });
 
   it('ImagePropsSchema applies correct defaults', () => {

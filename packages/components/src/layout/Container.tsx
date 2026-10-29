@@ -11,6 +11,7 @@ export const ContainerPropsSchema = z.object({
 });
 
 export type ContainerProps = z.infer<typeof ContainerPropsSchema>;
+export type ContainerInputProps = z.input<typeof ContainerPropsSchema>;
 
 const MAX_WIDTH_MAP: Record<string, string> = {
   sm: 'var(--dsk-container-sm, 640px)',
@@ -29,7 +30,7 @@ const PADDING_MAP: Record<string, string> = {
   xl: 'var(--dsk-spacing-xl, 32px)',
 };
 
-export const Container: React.FC<RenderComponentProps<ContainerProps>> = ({
+export const Container: React.FC<RenderComponentProps<ContainerInputProps>> = ({
   props,
   style,
   children,

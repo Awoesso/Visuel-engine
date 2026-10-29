@@ -14,8 +14,9 @@ export const ImagePropsSchema = z.object({
 });
 
 export type ImageProps = z.infer<typeof ImagePropsSchema>;
+export type ImageInputProps = z.input<typeof ImagePropsSchema>;
 
-export const Image: React.FC<RenderComponentProps<ImageProps>> = ({
+export const Image: React.FC<RenderComponentProps<ImageInputProps>> = ({
   props,
   style,
 }) => {

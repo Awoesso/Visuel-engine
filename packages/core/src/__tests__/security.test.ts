@@ -8,6 +8,8 @@ describe('Security Limits & URL Validation', () => {
     expect(isSafeUrl('https://example.com/products')).toBe(true);
     expect(isSafeUrl('http://example.com')).toBe(true);
     expect(isSafeUrl('/products/123')).toBe(true);
+    expect(isSafeUrl('./relative/path')).toBe(true);
+    expect(isSafeUrl('../parent/path')).toBe(true);
     expect(isSafeUrl('#section-features')).toBe(true);
     expect(isSafeUrl('mailto:support@example.com')).toBe(true);
     expect(isSafeUrl('tel:+1234567890')).toBe(true);
@@ -16,11 +18,18 @@ describe('Security Limits & URL Validation', () => {
     expect(isSafeUrl(undefined)).toBe(true);
   });
 
-  it('should reject dangerous URI schemes', () => {
+  it('should reject dangerous URI schemes and evasion attempts', () => {
     expect(isSafeUrl('javascript:alert(1)')).toBe(false);
     expect(isSafeUrl('JAVASCRIPT:alert(document.cookie)')).toBe(false);
+    expect(isSafeUrl('java\nscript:alert(1)')).toBe(false);
+    expect(isSafeUrl('java\tscript:alert(1)')).toBe(false);
     expect(isSafeUrl('vbscript:msgbox(1)')).toBe(false);
     expect(isSafeUrl('data:text/html,<script>alert(1)</script>')).toBe(false);
+    expect(isSafeUrl('file:///etc/passwd')).toBe(false);
+    expect(isSafeUrl('blob:https://example.com/uuid')).toBe(false);
+    expect(isSafeUrl('//evil.com/phishing')).toBe(false);
+    expect(isSafeUrl('jav&#x61;script:alert(1)')).toBe(false);
+    expect(isSafeUrl('https://example.com\0evil')).toBe(false);
   });
 
   it('should sanitize unsafe URLs in props objects', () => {
