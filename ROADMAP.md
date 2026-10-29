@@ -58,13 +58,13 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 5. Phase 3 — Component Registry
 
 ### Tasks
-- [ ] Define component registration contracts.
-- [ ] Register basic elements.
-- [ ] Register layout components.
-- [ ] Define editable property metadata.
-- [ ] Define default component properties.
-- [ ] Validate component configurations.
-- [ ] Handle unknown component types safely.
+- [x] Define component registration contracts.
+- [x] Register basic elements.
+- [x] Register layout components.
+- [x] Define editable property metadata.
+- [x] Define default component properties.
+- [x] Validate component configurations.
+- [x] Handle unknown component types safely.
 
 ### Initial Components
 - Text and headings.
