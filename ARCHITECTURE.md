@@ -175,9 +175,13 @@ More precisely:
 - `core` is independent of the other project packages.
 - `react-renderer` depends on `core`.
 - `components` depends on `core` and the rendering interfaces it needs.
-- `templates` depends on `core` and uses registered component identifiers.
-- `editor` depends on `core`, the renderer, and the component metadata needed for editing.
+- `templates` depends on `core` and the registered component package for reusable page structures.
+- `editor` depends on `core`, the renderer, component metadata, and the optional reusable-section catalog.
 - `playground` integrates the packages for testing.
+
+The dependency remains acyclic: the section catalog contains serializable
+`SectionNode` data and registered component identifiers; it does not depend on
+the editor or its store.
 
 The exact package dependencies must be checked during implementation to avoid circular dependencies.
 
@@ -344,6 +348,7 @@ Incompatible templates or components must be reported clearly rather than silent
 ## 15. Testing Strategy
 
 ### Unit Tests
+
 - Schema validation.
 - Component property validation.
 - Theme token resolution.
@@ -351,6 +356,7 @@ Incompatible templates or components must be reported clearly rather than silent
 - Registry behavior.
 
 ### Integration Tests
+
 - Rendering complete page documents.
 - Combining templates and registered components.
 - Editor operations and history.
@@ -358,6 +364,7 @@ Incompatible templates or components must be reported clearly rather than silent
 - Feature-restricted editor behavior.
 
 ### End-to-End Tests
+
 - Select a template.
 - Edit and reorder components.
 - Save a draft.

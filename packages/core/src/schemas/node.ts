@@ -42,6 +42,9 @@ export const ComponentNodeSchema: z.ZodType<
   children: z.lazy(() => z.array(ComponentNodeSchema)).default([]),
 });
 
+// Input type for raw data before validation – mirrors the Zod input shape.
+export type ComponentNodeInput = z.input<typeof ComponentNodeSchema>;
+
 export const SectionNodeSchema = z.object({
   id: z.string().min(1, 'Section ID cannot be empty'),
   type: z.string().default('section'),

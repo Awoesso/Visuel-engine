@@ -22,7 +22,7 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
   node,
   currentDepth = 0,
 }) => {
-  const { registry, viewport, mode, fallbackComponent } = useRenderer();
+  const { registry, viewport, mode, fallbackComponent, renderNode } = useRenderer();
 
   if (node.hidden) {
     return null;
@@ -68,7 +68,9 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
   let renderedChildren: React.ReactNode = null;
   if (node.children && node.children.length > 0) {
     renderedChildren = node.children.map((child) => (
-      <NodeRenderer key={child.id} node={child} currentDepth={currentDepth + 1} />
+      <React.Fragment key={child.id}>
+        {renderNode(child, currentDepth + 1)}
+      </React.Fragment>
     ));
   }
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { PageRenderer } from '../components/PageRenderer';
 import type { ComponentMapping, RenderComponentProps } from '../types';
@@ -119,7 +119,7 @@ describe('PageRenderer', () => {
     expect(screen.getByText(/third-party\/carousel/)).toBeDefined();
   });
 
-  it('should isolate component errors with SafeErrorBoundary and not break surrounding nodes', () => {
+  it('should isolate component errors with SafeErrorBoundary and not break surrounding nodes', () => { vi.spyOn(console, 'error').mockImplementation(() => {});
     const docWithCrash = PageDocumentSchema.parse({
       id: 'doc-crash',
       schemaVersion: CURRENT_SCHEMA_VERSION,

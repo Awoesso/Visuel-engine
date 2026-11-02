@@ -15,6 +15,7 @@ export const PageRenderer: React.FC<PageRendererProps> = ({
   validate = true,
   viewport = 'desktop',
   mode = 'render',
+  renderNode,
   fallbackComponent,
   className,
   style,
@@ -74,13 +75,16 @@ export const PageRenderer: React.FC<PageRendererProps> = ({
       theme: validDoc.theme,
       viewport,
       mode,
-      renderNode: (node, depth) => <NodeRenderer node={node} currentDepth={depth} />,
+      renderNode: (node, depth) => {
+        const renderedNode = <NodeRenderer node={node} currentDepth={depth} />;
+        return renderNode ? renderNode(node, renderedNode) : renderedNode;
+      },
       renderSection: (section, index) => (
         <SectionRenderer key={section.id} section={section} index={index} />
       ),
       fallbackComponent,
     }),
-    [registry, validDoc.theme, viewport, mode, fallbackComponent],
+    [registry, validDoc.theme, viewport, mode, renderNode, fallbackComponent],
   );
 
   return (

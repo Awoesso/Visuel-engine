@@ -44,6 +44,7 @@ export interface PageRendererProps {
   validate?: boolean;
   viewport?: ViewportMode;
   mode?: RendererMode;
+  renderNode?: (node: ComponentNode, renderedNode: React.ReactNode) => React.ReactNode;
   fallbackComponent?: React.ComponentType<{ node?: ComponentNode; error?: Error }>;
   className?: string;
   style?: React.CSSProperties;

@@ -16,6 +16,7 @@ export type {
 
 export type {
   ComponentNode,
+  ComponentNodeInput,
   SectionNode,
 } from '../schemas/node';
 

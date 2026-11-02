@@ -26,6 +26,7 @@ The engine is designed to be reusable across multiple SaaS applications, especia
 ## 3. Core Features
 
 ### Template Management
+
 - Browse available templates.
 - Preview a template before applying it.
 - Switch templates without losing existing work.
@@ -33,6 +34,7 @@ The engine is designed to be reusable across multiple SaaS applications, especia
 - Support template versions and compatibility checks.
 
 ### Visual Page Builder
+
 - Drag and drop sections and elements.
 - Reorder, resize, and nest supported components.
 - Edit content, styles, and responsive settings.
@@ -41,6 +43,7 @@ The engine is designed to be reusable across multiple SaaS applications, especia
 - Automatically save drafts and support manual saving.
 
 ### Component System
+
 The engine supports several component families:
 
 - **Basic elements:** text, headings, images, buttons, videos, icons, and separators.
@@ -49,6 +52,7 @@ The engine supports several component families:
 - **SaaS-connected components:** product details, prices, stock information, search, categories, and cart actions.
 
 ### Design System
+
 - Global color palettes.
 - Typography settings.
 - Spacing and layout tokens.
@@ -57,12 +61,14 @@ The engine supports several component families:
 - Shared styles that update components using the corresponding design tokens.
 
 ### Subscription Features
+
 - Configurable feature availability.
 - Usage limits based on subscription plans.
 - Locked premium features with explanations and upgrade prompts.
 - Server-side authorization handled by the integrating SaaS.
 
 ### Publishing and Versioning
+
 - Draft and published configurations.
 - Preview before publication.
 - Version history and restoration.
@@ -145,35 +151,41 @@ The engine will provide controlled interfaces for accessing the data and actions
 ## 8. Development Roadmap
 
 ### Phase 1 — Foundation
+
 - Establish the monorepo.
 - Define shared types and page document schemas.
 - Implement configuration validation.
 - Establish component registration.
 
 ### Phase 2 — Rendering
+
 - Build the React renderer.
 - Support nested page structures.
 - Implement theme tokens and responsive styles.
 
 ### Phase 3 — Visual Editor
+
 - Implement the editor interface.
 - Add drag-and-drop functionality.
 - Add component settings and responsive controls.
 - Implement undo, redo, and draft persistence interfaces.
 
 ### Phase 4 — Templates and Integrations
+
 - Create initial storefront templates.
 - Add reusable sections and components.
 - Define controlled SaaS data integration interfaces.
 - Implement subscription feature declarations.
 
 ### Phase 5 — Reliability
+
 - Add automated tests.
 - Implement versioning and migrations.
 - Review accessibility, performance, and security.
 - Test compatibility with supported Next.js applications.
 
 ### Phase 6 — Release
+
 - Document the public API.
 - Prepare npm package builds.
 - Configure versioning and release workflows.
@@ -197,9 +209,20 @@ Additional technical documentation will be maintained in the `docs/` directory.
 
 ## 10. Project Status
 
-**Status:** Planning and initial design.
+**Status:** Active MVP development.
 
-The architecture, public APIs, dependencies, and implementation details will be finalized progressively before the first stable release.
+The repository includes the core document model, React renderer, nine standard
+components, three reusable section presets, and an initial visual editor. The Playground editor stores its
+current document in browser `localStorage` with debounced autosave and restore.
+This is local draft persistence only; it is not a substitute for host-app
+storage, publishing, or cross-device synchronization. The editor now also
+supports a document-backed Layers tree, nested selection, component
+duplication/deletion/reordering, explicit before/after/inside drag-and-drop
+with registry parent constraints, responsive layout and appearance controls,
+canvas zoom/fit, and grouped undo/redo. Its preview uses the local Geist font
+package. The editor remains an MVP: persistence is browser-local, drag-and-drop
+is limited to the supported component tree, and whole-page template selection,
+publishing, collaboration, and direct canvas resizing are not included.
 
 ## 11. License
 

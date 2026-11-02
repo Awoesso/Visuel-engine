@@ -20,6 +20,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 3. Phase 1 — Project Foundation
 
 ### Tasks
+
 - [x] Initialize the Git repository.
 - [x] Configure pnpm workspaces.
 - [x] Configure TypeScript.
@@ -30,6 +31,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [x] Document package naming and dependency rules.
 
 ### Completion Criteria
+
 - The workspace installs successfully.
 - TypeScript checks run successfully.
 - All initial packages build or pass their configured checks.
@@ -38,6 +40,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 4. Phase 2 — Core Data Model
 
 ### Tasks
+
 - [x] Define page document types.
 - [x] Define component node types.
 - [x] Define section and layout structures.
@@ -49,6 +52,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [x] Define migration interfaces.
 
 ### Completion Criteria
+
 - A valid page document can be represented as serializable data.
 - Invalid documents are rejected with useful errors.
 - Nested structures are validated.
@@ -58,6 +62,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 5. Phase 3 — Component Registry
 
 ### Tasks
+
 - [x] Define component registration contracts.
 - [x] Register basic elements.
 - [x] Register layout components.
@@ -67,6 +72,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [x] Handle unknown component types safely.
 
 ### Initial Components
+
 - Text and headings.
 - Images.
 - Buttons.
@@ -76,6 +82,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - Grids.
 
 ### Completion Criteria
+
 - Components can be registered through a defined interface.
 - Default properties and validation work consistently.
 - Invalid or unknown component types do not crash the entire application.
@@ -83,6 +90,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 6. Phase 4 — React Renderer
 
 ### Tasks
+
 - [x] Implement the document renderer.
 - [x] Render registered components.
 - [x] Support nested sections and layouts.
@@ -92,6 +100,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [x] Add renderer unit and integration tests.
 
 ### Completion Criteria
+
 - A validated page document renders as a React interface.
 - Nested components render correctly.
 - Theme and responsive settings are applied.
@@ -100,6 +109,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 7. Phase 5 — Initial Templates
 
 ### Tasks
+
 - [ ] Define the template registration format.
 - [ ] Create the template catalog.
 - [ ] Add an initial storefront template.
@@ -109,6 +119,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [ ] Define how customized templates are exported and reused.
 
 ### Completion Criteria
+
 - Users can select and preview a template.
 - A compatible template can initialize a page.
 - Switching templates does not silently overwrite existing work.
@@ -117,18 +128,20 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 8. Phase 6 — Visual Editor MVP
 
 ### Tasks
-- [ ] Build the editor layout.
-- [ ] Implement component selection.
-- [ ] Add the component library panel.
-- [ ] Add the properties panel.
-- [ ] Implement component insertion and deletion.
-- [ ] Implement drag-and-drop reordering.
-- [ ] Implement supported nested layouts.
-- [ ] Add undo and redo.
-- [ ] Add draft save-status indicators.
-- [ ] Add responsive preview controls.
+
+- [x] Build the editor layout.
+- [x] Implement component selection.
+- [x] Add the component library panel.
+- [x] Add the properties panel.
+- [x] Implement component insertion and deletion.
+- [x] Implement drag-and-drop reordering.
+- [x] Implement supported nested layouts.
+- [x] Add undo and redo.
+- [x] Add draft save-status indicators.
+- [x] Add responsive preview controls.
 
 ### Completion Criteria
+
 - A user can build and edit a simple page visually.
 - Changes update the preview.
 - Supported components can be reordered and configured.
@@ -138,16 +151,19 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 9. Phase 7 — Advanced Editing
 
 ### Tasks
-- [ ] Add advanced layout controls.
+
+- [x] Add advanced layout controls.
 - [ ] Add supported component resizing.
 - [ ] Improve nested component editing.
-- [ ] Add responsive property overrides.
+- [x] Add responsive property overrides.
 - [ ] Add global design-token editing.
-- [ ] Add reusable sections from the predefined library.
+- [x] Add reusable sections from the predefined library.
+- [x] Add canvas zoom and fit controls.
 - [ ] Add keyboard-accessible alternatives to drag-and-drop.
 - [ ] Improve editor performance for larger pages.
 
 ### Completion Criteria
+
 - Complex layouts can be edited within documented constraints.
 - Responsive overrides behave predictably.
 - Global design-token changes update dependent components.
@@ -156,6 +172,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 10. Phase 8 — Saving and Version History
 
 ### Tasks
+
 - [ ] Define document persistence interfaces.
 - [ ] Implement draft loading and saving integration.
 - [ ] Add autosave.
@@ -167,6 +184,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [ ] Separate draft and published documents.
 
 ### Completion Criteria
+
 - The host application can persist and retrieve drafts.
 - Saving failures are clearly reported.
 - Previous revisions can be restored through a controlled workflow.
@@ -175,6 +193,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 11. Phase 9 — SaaS Integration
 
 ### Tasks
+
 - [ ] Define the storefront data-provider interface.
 - [ ] Integrate product and category data.
 - [ ] Add price and stock display components.
@@ -185,6 +204,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [ ] Test with a mock multi-vendor SaaS application.
 
 ### Completion Criteria
+
 - Components can consume authorized host-provided data.
 - Business operations remain under host application control.
 - Feature restrictions are communicated clearly.
@@ -193,6 +213,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 12. Phase 10 — Quality and Security
 
 ### Tasks
+
 - [ ] Expand automated test coverage.
 - [ ] Test malformed configurations.
 - [ ] Test invalid component properties.
@@ -204,6 +225,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [ ] Test document migrations.
 
 ### Completion Criteria
+
 - Critical workflows have automated tests.
 - Security boundaries are documented and verified.
 - Errors are handled predictably.
@@ -212,6 +234,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 ## 13. Phase 11 — npm Release
 
 ### Tasks
+
 - [ ] Finalize package names.
 - [ ] Define public exports.
 - [ ] Configure production builds.
@@ -222,6 +245,7 @@ Development will proceed incrementally. Each phase must establish a working foun
 - [ ] Publish an initial release when quality criteria are met.
 
 ### Completion Criteria
+
 - Packages can be installed independently where intended.
 - Public APIs are documented.
 - Builds and tests pass in the release workflow.
@@ -244,8 +268,15 @@ Advanced template catalogs, extensive version history, complex subscription cont
 
 ## 15. Current Status
 
-**Current stage:** Planning and documentation.
+**Current stage:** MVP implementation and verification.
 
-No phase should be marked complete until its completion criteria have been verified.
+The core schemas, renderer, standard component registry, and initial editor are
+implemented. The editor supports browser-local autosave and restore, a
+document-backed Layers tree, nested selection, component duplication/deletion,
+constrained native drag-and-drop, responsive style overrides, and grouped
+undo/redo. Host-application persistence and the broader production editing
+workflow remain incomplete.
 
-The immediate next milestone is Phase 1: establish the repository, workspace configuration, TypeScript settings, and initial development tooling.
+The next milestone is to complete interaction-level browser coverage, refine
+the editor at tablet and mobile widths, and define a persistence adapter for
+integrating SaaS applications.

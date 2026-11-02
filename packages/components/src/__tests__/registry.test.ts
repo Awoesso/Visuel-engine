@@ -11,34 +11,43 @@ import {
   TextPropsSchema,
   ButtonPropsSchema,
   ImagePropsSchema,
+  StackPropsSchema,
+  SpacerPropsSchema,
+  DividerPropsSchema,
 } from '..';
 
 describe('Default Registries', () => {
-  it('should create a core registry with all 6 standard component definitions', () => {
+  it('should create a core registry with all 9 standard component definitions', () => {
     const registry = createDefaultCoreRegistry();
-    expect(registry.size).toBe(6);
+    expect(registry.size).toBe(9);
     expect(registry.has('core/container')).toBe(true);
     expect(registry.has('core/grid')).toBe(true);
     expect(registry.has('core/heading')).toBe(true);
     expect(registry.has('core/text')).toBe(true);
     expect(registry.has('core/button')).toBe(true);
     expect(registry.has('core/image')).toBe(true);
+    expect(registry.has('core/stack')).toBe(true);
+    expect(registry.has('core/spacer')).toBe(true);
+    expect(registry.has('core/divider')).toBe(true);
   });
 
-  it('should export a renderer registry record with all 6 components', () => {
-    expect(Object.keys(defaultRendererRegistry)).toHaveLength(6);
+  it('should export a renderer registry record with all 9 components', () => {
+    expect(Object.keys(defaultRendererRegistry)).toHaveLength(9);
     expect(typeof defaultRendererRegistry['core/container']).toBe('function');
     expect(typeof defaultRendererRegistry['core/grid']).toBe('function');
     expect(typeof defaultRendererRegistry['core/heading']).toBe('function');
     expect(typeof defaultRendererRegistry['core/text']).toBe('function');
     expect(typeof defaultRendererRegistry['core/button']).toBe('function');
     expect(typeof defaultRendererRegistry['core/image']).toBe('function');
+    expect(typeof defaultRendererRegistry['core/stack']).toBe('function');
+    expect(typeof defaultRendererRegistry['core/spacer']).toBe('function');
+    expect(typeof defaultRendererRegistry['core/divider']).toBe('function');
   });
 
   it('should create a Map-based renderer registry', () => {
     const map = createDefaultRendererMap();
     expect(map instanceof Map).toBe(true);
-    expect(map.size).toBe(6);
+    expect(map.size).toBe(9);
   });
 });
 
@@ -105,5 +114,13 @@ describe('Props Schemas — defaults and validation', () => {
     expect(parsed.alt).toBe('');
     expect(parsed.objectFit).toBe('cover');
     expect(parsed.loading).toBe('lazy');
+  });
+
+  it('layout and spacing component schemas apply defaults and reject invalid values', () => {
+    expect(StackPropsSchema.parse({}).direction).toBe('column');
+    expect(SpacerPropsSchema.parse({}).size).toBe(32);
+    expect(DividerPropsSchema.parse({}).thickness).toBe(1);
+    expect(SpacerPropsSchema.safeParse({ size: 0 }).success).toBe(false);
+    expect(DividerPropsSchema.safeParse({ thickness: 9 }).success).toBe(false);
   });
 });

@@ -1,7 +1,6 @@
 import React from 'react';
 import type { SectionNode } from '@dsk/core';
 import { useRenderer } from '../context/useRenderer';
-import { NodeRenderer } from './NodeRenderer';
 import { SafeErrorBoundary } from './SafeErrorBoundary';
 import {
   resolveResponsiveStyles,
@@ -17,7 +16,7 @@ export const SectionRenderer: React.FC<SectionRendererProps> = ({
   section,
   index: _index,
 }) => {
-  const { viewport, fallbackComponent } = useRenderer();
+  const { viewport, fallbackComponent, renderNode } = useRenderer();
 
   if (section.hidden) {
     return null;
@@ -54,7 +53,7 @@ export const SectionRenderer: React.FC<SectionRendererProps> = ({
       >
         {section.children && section.children.length > 0
           ? section.children.map((child) => (
-              <NodeRenderer key={child.id} node={child} currentDepth={1} />
+              <React.Fragment key={child.id}>{renderNode(child, 1)}</React.Fragment>
             ))
           : null}
       </section>
