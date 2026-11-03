@@ -142,15 +142,22 @@ interface EditorActions {
   addComponentToSection: (componentId: string, sectionId: string) => boolean;
   addSection: (preset: SectionPreset) => void;
   selectNode: (nodeId: NodeId | null) => void;
+  updateNodeName: (nodeId: NodeId, name: string) => boolean;
+  setNodeLocked: (nodeId: NodeId, locked: boolean) => boolean;
+  setNodeHidden: (nodeId: NodeId, hidden: boolean) => boolean;
+  updateSectionName: (sectionId: string, name: string) => boolean;
+  setSectionLocked: (sectionId: string, locked: boolean) => boolean;
+  setSectionHidden: (sectionId: string, hidden: boolean) => boolean;
   updateNodeProps: (nodeId: NodeId, props: Partial<ComponentNode['props']>) => void;
   updateNodeStyles: (nodeId: NodeId, mode: ViewportMode, styles: Partial<ElementStyles>) => void;
-  deleteNode: (nodeId: NodeId) => void;
-  duplicateNode: (nodeId: NodeId) => void;
+  deleteNode: (nodeId: NodeId) => boolean;
+  duplicateNode: (nodeId: NodeId) => boolean;
   moveNode: (nodeId: NodeId, targetId: NodeId, position: 'before' | 'after' | 'inside') => boolean;
   moveNodeToSection: (nodeId: NodeId, sectionId: string) => boolean;
   moveNodeBy: (nodeId: NodeId, direction: -1 | 1) => void;
   undo: () => void;
   redo: () => void;
+  updateDocumentTitle: (title: string) => void;
   setViewport: (mode: ViewportMode) => void;
   setZoom: (zoom: number) => void;
   replaceDocument: (document: PageDocument) => void;
@@ -176,6 +183,42 @@ function findNode(nodes: ComponentNode[], nodeId: NodeId): ComponentNode | undef
   }
 
   return undefined;
+}
+
+function findNodeLockState(
+  nodes: ComponentNode[],
+  nodeId: NodeId,
+  inheritedLocked: boolean,
+): { locked: boolean; inheritedLocked: boolean } | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) {
+      return { locked: node.locked, inheritedLocked };
+    }
+
+    const nested = findNodeLockState(node.children, nodeId, inheritedLocked || node.locked);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+export function isNodeEffectivelyLocked(document: PageDocument, nodeId: NodeId): boolean {
+  const section = document.sections.find((candidate) => candidate.id === nodeId);
+  if (section) return section.locked;
+
+  for (const candidate of document.sections) {
+    const lockState = findNodeLockState(candidate.children, nodeId, candidate.locked);
+    if (lockState) return lockState.locked || lockState.inheritedLocked;
+  }
+  return false;
+}
+
+function isNodeLockedByAncestor(document: PageDocument, nodeId: NodeId): boolean {
+  for (const section of document.sections) {
+    if (section.id === nodeId) return false;
+    const lockState = findNodeLockState(section.children, nodeId, section.locked);
+    if (lockState) return lockState.inheritedLocked;
+  }
+  return false;
 }
 
 function containsNodeId(document: PageDocument, nodeId: NodeId): boolean {
@@ -283,14 +326,17 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     }
 
     const nodeId = newNode.id;
-    const selectedLocation = get().selectedNodeId
-      ? findNodeLocation(currentDocument.sections, get().selectedNodeId as string)
-      : undefined;
+    const selectedNodeId = get().selectedNodeId;
+    const selectedLocation =
+      selectedNodeId && !isNodeEffectivelyLocked(currentDocument, selectedNodeId)
+        ? findNodeLocation(currentDocument.sections, selectedNodeId)
+        : undefined;
     const selected = selectedLocation?.list[selectedLocation.index];
     const parentTarget = selected && isAllowedChild(selected, componentId) ? selected : undefined;
+    const destinationSection = currentDocument.sections.find((section) => !section.locked);
     const destinationList = parentTarget
       ? parentTarget.children
-      : (selectedLocation?.list ?? currentDocument.sections[0]?.children);
+      : (selectedLocation?.list ?? destinationSection?.children);
     if (!destinationList) {
       throw new Error('The editor document must contain a section before adding components.');
     }
@@ -309,7 +355,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
           )?.children
         : selectedLocation
           ? findNodeLocation(draft.sections, selected?.id ?? '')?.list
-          : draft.sections[0]?.children;
+          : draft.sections.find((section) => section.id === destinationSection?.id)?.children;
       if (!list) throw new Error('Unable to resolve the insertion point.');
       if (parentTarget) {
         list.push(newNode);
@@ -328,6 +374,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     const targetLocation = findNodeLocation(current.sections, targetId);
     const target = targetLocation?.list[targetLocation.index];
     if (!newNode || !target || !targetLocation) return false;
+    if (isNodeEffectivelyLocked(current, targetId)) return false;
     const parent = position === 'inside' ? target : targetLocation.parent;
     if (parent && !isAllowedChild(parent, componentId)) return false;
     if (position === 'inside' && !getDefaultComponent(target.type)?.canHaveChildren) return false;
@@ -354,7 +401,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     const current = get().document;
     const section = current.sections.find((candidate) => candidate.id === sectionId);
     const newNode = createComponentNode(componentId, current);
-    if (!section || !newNode) return false;
+    if (!section || section.locked || !newNode) return false;
     const candidate = produce(current, (draft) => {
       draft.sections.find((candidate) => candidate.id === sectionId)?.children.push(newNode);
     });
@@ -384,8 +431,98 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     commitDocument(set, candidate, section.children[0]?.id ?? null);
   },
   selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+  updateNodeName: (nodeId, name) => {
+    const current = get().document;
+    if (isNodeEffectivelyLocked(current, nodeId)) return false;
+    const candidate = produce(current, (draft) => {
+      const node = draft.sections
+        .map((section) => findNode(section.children, nodeId))
+        .find((match) => match !== undefined);
+      if (!node) return;
+      const normalizedName = name.trim();
+      if (normalizedName) node.name = normalizedName;
+      else delete node.name;
+    });
+    if (candidate === current) return false;
+    commitDocument(set, candidate, get().selectedNodeId, `name:${nodeId}`);
+    return true;
+  },
+  setNodeLocked: (nodeId, locked) => {
+    const current = get().document;
+    if (isNodeLockedByAncestor(current, nodeId)) return false;
+    const nodeExists = current.sections.some(
+      (section) => findNode(section.children, nodeId) !== undefined,
+    );
+    if (!nodeExists) return false;
+    const candidate = produce(current, (draft) => {
+      const node = draft.sections
+        .map((section) => findNode(section.children, nodeId))
+        .find((match) => match !== undefined);
+      if (node) node.locked = locked;
+    });
+    if (candidate === current) return true;
+    commitDocument(set, candidate, get().selectedNodeId);
+    return true;
+  },
+  setNodeHidden: (nodeId, hidden) => {
+    const current = get().document;
+    if (isNodeLockedByAncestor(current, nodeId)) return false;
+    const nodeExists = current.sections.some(
+      (section) => findNode(section.children, nodeId) !== undefined,
+    );
+    if (!nodeExists) return false;
+    const candidate = produce(current, (draft) => {
+      const node = draft.sections
+        .map((section) => findNode(section.children, nodeId))
+        .find((match) => match !== undefined);
+      if (node) node.hidden = hidden;
+    });
+    if (candidate === current) return true;
+    commitDocument(set, candidate, get().selectedNodeId);
+    return true;
+  },
+  updateSectionName: (sectionId, name) => {
+    const current = get().document;
+    const section = current.sections.find((candidate) => candidate.id === sectionId);
+    const normalizedName = name.trim();
+    if (!section || section.locked || !normalizedName) return false;
+    if (section.name === normalizedName) return true;
+    const candidate = produce(current, (draft) => {
+      const draftSection = draft.sections.find((item) => item.id === sectionId);
+      if (draftSection) draftSection.name = normalizedName;
+    });
+    commitDocument(set, candidate, get().selectedNodeId, `section-name:${sectionId}`);
+    return true;
+  },
+  setSectionLocked: (sectionId, locked) => {
+    const current = get().document;
+    const section = current.sections.find((candidate) => candidate.id === sectionId);
+    if (!section) return false;
+    if (section.locked === locked) return true;
+    const candidate = produce(current, (draft) => {
+      const draftSection = draft.sections.find((item) => item.id === sectionId);
+      if (draftSection) draftSection.locked = locked;
+    });
+    commitDocument(set, candidate, get().selectedNodeId);
+    return true;
+  },
+  setSectionHidden: (sectionId, hidden) => {
+    const current = get().document;
+    const section = current.sections.find((candidate) => candidate.id === sectionId);
+    if (!section) return false;
+    if (section.hidden === hidden) return true;
+    const candidate = produce(current, (draft) => {
+      const draftSection = draft.sections.find((item) => item.id === sectionId);
+      if (draftSection) draftSection.hidden = hidden;
+    });
+    commitDocument(set, candidate, get().selectedNodeId);
+    return true;
+  },
   updateNodeProps: (nodeId, props) => {
     const current = get().document;
+    if (isNodeEffectivelyLocked(current, nodeId)) {
+      throw new Error(`Cannot update locked component "${nodeId}".`);
+    }
     const node = current.sections
       .map((section) => findNode(section.children, nodeId))
       .find((match) => match !== undefined);
@@ -401,11 +538,13 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         .find((match) => match !== undefined);
       if (draftNode) draftNode.props = parsed.data;
     });
-    assertValidDocument(candidate);
     commitDocument(set, candidate, nodeId, `props:${nodeId}`);
   },
   updateNodeStyles: (nodeId, mode, styles) => {
     const current = get().document;
+    if (isNodeEffectivelyLocked(current, nodeId)) {
+      throw new Error(`Cannot update styles for locked component "${nodeId}".`);
+    }
     const candidate = produce(current, (draft) => {
       const node = draft.sections
         .map((section) => findNode(section.children, nodeId))
@@ -421,13 +560,13 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       node.styles = parsed.data;
     });
     if (candidate === current) return;
-    assertValidDocument(candidate);
     commitDocument(set, candidate, nodeId, `styles:${nodeId}`);
   },
   deleteNode: (nodeId) => {
     const current = get().document;
+    if (isNodeEffectivelyLocked(current, nodeId)) return false;
     const location = findNodeLocation(current.sections, nodeId);
-    if (!location) return;
+    if (!location) return false;
     const candidate = produce(current, (draft) => {
       const draftLocation = findNodeLocation(draft.sections, nodeId);
       if (draftLocation) draftLocation.list.splice(draftLocation.index, 1);
@@ -436,23 +575,29 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     const selectedWasDeleted =
       selected === nodeId || (selected !== null && isDescendantOf(current, nodeId, selected));
     commitDocument(set, candidate, selectedWasDeleted ? null : selected);
+    return true;
   },
   duplicateNode: (nodeId) => {
     const current = get().document;
+    if (isNodeEffectivelyLocked(current, nodeId)) return false;
     const location = findNodeLocation(current.sections, nodeId);
-    if (!location) return;
+    if (!location) return false;
     const original = location.list[location.index];
-    if (!original) return;
+    if (!original) return false;
     const duplicate = cloneWithFreshIds(original, current);
     const candidate = produce(current, (draft) => {
       const draftLocation = findNodeLocation(draft.sections, nodeId);
       if (draftLocation) draftLocation.list.splice(draftLocation.index + 1, 0, duplicate);
     });
     commitDocument(set, candidate, duplicate.id);
+    return true;
   },
   moveNode: (nodeId, targetId, position) => {
     if (nodeId === targetId) return false;
     const current = get().document;
+    if (isNodeEffectivelyLocked(current, nodeId) || isNodeEffectivelyLocked(current, targetId)) {
+      return false;
+    }
     if (position === 'inside' && isDescendantOf(current, nodeId, targetId)) return false;
     const sourceLocation = findNodeLocation(current.sections, nodeId);
     const targetLocation = findNodeLocation(current.sections, targetId);
@@ -491,7 +636,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     const current = get().document;
     const sourceLocation = findNodeLocation(current.sections, nodeId);
     const section = current.sections.find((candidate) => candidate.id === sectionId);
-    if (!sourceLocation || !section) return false;
+    if (!sourceLocation || !section || section.locked || isNodeEffectivelyLocked(current, nodeId))
+      return false;
     const candidate = produce(current, (draft) => {
       const location = findNodeLocation(draft.sections, nodeId);
       const destination = draft.sections.find((candidate) => candidate.id === sectionId);
@@ -535,6 +681,20 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         futureDocuments: state.futureDocuments.slice(1),
       };
     });
+  },
+  updateDocumentTitle: (title) => {
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      throw new Error('Document title cannot be empty.');
+    }
+
+    const currentDocument = get().document;
+    if (currentDocument.metadata.title === normalizedTitle) return;
+    const candidate = PageDocumentSchema.parse({
+      ...currentDocument,
+      metadata: { ...currentDocument.metadata, title: normalizedTitle },
+    });
+    commitDocument(set, candidate, get().selectedNodeId, 'metadata:title');
   },
   setViewport: (mode) => set({ viewport: mode }),
   setZoom: (zoom) => set({ zoom: Math.min(1.5, Math.max(0.25, Math.round(zoom * 100) / 100)) }),

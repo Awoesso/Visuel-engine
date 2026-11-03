@@ -7,6 +7,18 @@ function getNodeIds(nodes: (typeof initialDocument.sections)[number]['children']
   return nodes.flatMap((node) => [node.id, ...getNodeIds(node.children)]);
 }
 
+function findTestNode(
+  nodes: (typeof initialDocument.sections)[number]['children'],
+  nodeId: string,
+): (typeof initialDocument.sections)[number]['children'][number] | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    const child = findTestNode(node.children, nodeId);
+    if (child) return child;
+  }
+  return undefined;
+}
+
 function resetStore(): void {
   useEditorStore
     .getState()
@@ -15,6 +27,68 @@ function resetStore(): void {
 
 describe('editor document actions', () => {
   beforeEach(resetStore);
+
+  it('renames the document and supports undo and redo', () => {
+    const originalTitle = useEditorStore.getState().document.metadata.title;
+    useEditorStore.getState().updateDocumentTitle('Landing page');
+
+    expect(useEditorStore.getState().document.metadata.title).toBe('Landing page');
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().document.metadata.title).toBe(originalTitle);
+    useEditorStore.getState().redo();
+    expect(useEditorStore.getState().document.metadata.title).toBe('Landing page');
+  });
+
+  it('rejects an empty document title', () => {
+    const originalDocument = useEditorStore.getState().document;
+    expect(() => useEditorStore.getState().updateDocumentTitle('   ')).toThrow(
+      'Document title cannot be empty.',
+    );
+    expect(useEditorStore.getState().document).toBe(originalDocument);
+  });
+
+  it('renames, hides, and locks nodes while preventing edits through locked ancestors', () => {
+    const store = useEditorStore.getState();
+    expect(store.updateNodeName('demo-heading', 'Hero title')).toBe(true);
+    expect(store.setNodeHidden('demo-heading', true)).toBe(true);
+    expect(
+      findTestNode(useEditorStore.getState().document.sections[0]!.children, 'demo-heading'),
+    ).toMatchObject({ name: 'Hero title', hidden: true });
+
+    expect(store.setNodeLocked('demo-container', true)).toBe(true);
+    expect(store.addComponentAt('core/text', 'demo-heading', 'after')).toBe(false);
+    expect(store.updateNodeName('demo-heading', 'Updated title')).toBe(false);
+    expect(store.setNodeHidden('demo-heading', false)).toBe(false);
+    expect(store.setNodeLocked('demo-heading', false)).toBe(false);
+    expect(store.duplicateNode('demo-heading')).toBe(false);
+    expect(store.deleteNode('demo-heading')).toBe(false);
+    expect(store.moveNode('demo-heading', 'demo-intro', 'after')).toBe(false);
+    expect(() => store.updateNodeProps('demo-heading', { text: 'Locked edit' })).toThrow(
+      'Cannot update locked component "demo-heading".',
+    );
+    expect(() => store.updateNodeStyles('demo-heading', 'desktop', { color: '#000000' })).toThrow(
+      'Cannot update styles for locked component "demo-heading".',
+    );
+
+    expect(store.setNodeLocked('demo-container', false)).toBe(true);
+    expect(store.updateNodeName('demo-heading', 'Updated title')).toBe(true);
+  });
+
+  it('renames sections and prevents edits inside locked sections', () => {
+    const store = useEditorStore.getState();
+    expect(store.updateSectionName('section-demo', 'Hero area')).toBe(true);
+    expect(store.setSectionHidden('section-demo', true)).toBe(true);
+    expect(store.setSectionLocked('section-demo', true)).toBe(true);
+    expect(store.addComponentToSection('core/text', 'section-demo')).toBe(false);
+    expect(store.setNodeLocked('demo-heading', true)).toBe(false);
+    expect(store.updateSectionName('section-demo', 'Locked area')).toBe(false);
+    expect(useEditorStore.getState().document.sections[0]).toMatchObject({
+      name: 'Hero area',
+      hidden: true,
+      locked: true,
+    });
+    expect(store.setSectionLocked('section-demo', false)).toBe(true);
+  });
 
   it('inserts a component into a selected container and selects it', () => {
     const store = useEditorStore.getState();

@@ -2,20 +2,14 @@ import React from 'react';
 import type { SectionNode } from '@dsk/core';
 import { useRenderer } from '../context/useRenderer';
 import { SafeErrorBoundary } from './SafeErrorBoundary';
-import {
-  resolveResponsiveStyles,
-  elementStylesToCssProperties,
-} from '../utils/styleResolver';
+import { resolveResponsiveStyles, elementStylesToCssProperties } from '../utils/styleResolver';
 
 export interface SectionRendererProps {
   section: SectionNode;
   index: number;
 }
 
-export const SectionRenderer: React.FC<SectionRendererProps> = ({
-  section,
-  index: _index,
-}) => {
+const SectionRendererView: React.FC<SectionRendererProps> = ({ section, index: _index }) => {
   const { viewport, fallbackComponent, renderNode } = useRenderer();
 
   if (section.hidden) {
@@ -53,10 +47,14 @@ export const SectionRenderer: React.FC<SectionRendererProps> = ({
       >
         {section.children && section.children.length > 0
           ? section.children.map((child) => (
-              <React.Fragment key={child.id}>{renderNode(child, 1)}</React.Fragment>
+              <React.Fragment key={child.id}>
+                {renderNode(child, 1, section.locked === true)}
+              </React.Fragment>
             ))
           : null}
       </section>
     </SafeErrorBoundary>
   );
 };
+
+export const SectionRenderer = React.memo(SectionRendererView);

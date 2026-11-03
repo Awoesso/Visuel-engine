@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import {
   validatePageDocument,
   themeToCssVariables,
+  type ComponentNode,
   type PageDocument,
 } from '@dsk/core';
 import { RendererContext } from '../context/RendererContext';
@@ -60,39 +61,66 @@ export const PageRenderer: React.FC<PageRendererProps> = ({
       </div>
     );
   }
+  return (
+    <ValidatedPageRenderer
+      document={validationResult.data}
+      registry={registry}
+      viewport={viewport}
+      mode={mode}
+      renderNode={renderNode}
+      fallbackComponent={fallbackComponent}
+      className={className}
+      style={style}
+    />
+  );
+};
 
-  const validDoc = validationResult.data;
-
-  // Convert theme tokens to scoped CSS variables
-  const themeCssVariables = useMemo(() => {
-    return themeToCssVariables(validDoc.theme);
-  }, [validDoc.theme]);
-
-  // Context value for nested section and node renderers
+const ValidatedPageRenderer: React.FC<
+  Omit<PageRendererProps, 'document' | 'validate'> & { document: PageDocument }
+> = ({
+  document,
+  registry,
+  viewport = 'desktop',
+  mode = 'render',
+  renderNode,
+  fallbackComponent,
+  className,
+  style,
+}) => {
+  const renderNodeRef = useRef(renderNode);
+  renderNodeRef.current = renderNode;
+  const renderNodeWithLatestCallback = useCallback(
+    (node: ComponentNode, depth: number, inheritedLocked = false) => {
+      const renderedNode = (
+        <NodeRenderer node={node} currentDepth={depth} inheritedLocked={inheritedLocked} />
+      );
+      const callback = renderNodeRef.current;
+      return callback ? callback(node, renderedNode, inheritedLocked) : renderedNode;
+    },
+    [],
+  );
+  const themeCssVariables = useMemo(() => themeToCssVariables(document.theme), [document.theme]);
   const contextValue: RendererContextValue = useMemo(
     () => ({
       registry,
-      theme: validDoc.theme,
+      theme: document.theme,
       viewport,
       mode,
-      renderNode: (node, depth) => {
-        const renderedNode = <NodeRenderer node={node} currentDepth={depth} />;
-        return renderNode ? renderNode(node, renderedNode) : renderedNode;
-      },
+      renderNode: renderNodeWithLatestCallback,
       renderSection: (section, index) => (
         <SectionRenderer key={section.id} section={section} index={index} />
       ),
       fallbackComponent,
     }),
-    [registry, validDoc.theme, viewport, mode, renderNode, fallbackComponent],
+    [registry, document.theme, viewport, mode, renderNodeWithLatestCallback, fallbackComponent],
   );
 
   return (
     <RendererContext.Provider value={contextValue}>
       <main
-        id={`dsk-page-${validDoc.id}`}
-        data-dsk-page-id={validDoc.id}
-        data-dsk-schema-version={validDoc.schemaVersion}
+        id={`dsk-page-${document.id}`}
+        data-dsk-page-id={document.id}
+        data-dsk-schema-version={document.schemaVersion}
         data-dsk-viewport={viewport}
         className={className}
         style={{
@@ -106,7 +134,7 @@ export const PageRenderer: React.FC<PageRendererProps> = ({
           ...style,
         }}
       >
-        {validDoc.sections.map((section, index) => (
+        {document.sections.map((section, index) => (
           <SectionRenderer key={section.id} section={section} index={index} />
         ))}
       </main>

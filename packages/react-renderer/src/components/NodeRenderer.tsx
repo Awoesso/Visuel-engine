@@ -1,26 +1,21 @@
 import React from 'react';
-import {
-  SECURITY_LIMITS,
-  sanitizePropsUrls,
-  type ComponentNode,
-} from '@dsk/core';
+import { SECURITY_LIMITS, sanitizePropsUrls, type ComponentNode } from '@dsk/core';
 import { useRenderer } from '../context/useRenderer';
 import { SafeErrorBoundary } from './SafeErrorBoundary';
 import { UnknownComponentFallback } from './UnknownComponentFallback';
-import {
-  resolveResponsiveStyles,
-  elementStylesToCssProperties,
-} from '../utils/styleResolver';
+import { resolveResponsiveStyles, elementStylesToCssProperties } from '../utils/styleResolver';
 import type { ReactComponentImplementation } from '../types';
 
 export interface NodeRendererProps {
   node: ComponentNode;
   currentDepth?: number;
+  inheritedLocked?: boolean;
 }
 
-export const NodeRenderer: React.FC<NodeRendererProps> = ({
+const NodeRendererView: React.FC<NodeRendererProps> = ({
   node,
   currentDepth = 0,
+  inheritedLocked = false,
 }) => {
   const { registry, viewport, mode, fallbackComponent, renderNode } = useRenderer();
 
@@ -67,9 +62,10 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
   // Recursively render children
   let renderedChildren: React.ReactNode = null;
   if (node.children && node.children.length > 0) {
+    const childrenLocked = inheritedLocked || node.locked === true;
     renderedChildren = node.children.map((child) => (
       <React.Fragment key={child.id}>
-        {renderNode(child, currentDepth + 1)}
+        {renderNode(child, currentDepth + 1, childrenLocked)}
       </React.Fragment>
     ));
   }
@@ -87,3 +83,5 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
     </SafeErrorBoundary>
   );
 };
+
+export const NodeRenderer = React.memo(NodeRendererView);

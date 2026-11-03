@@ -1,10 +1,74 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorCanvas } from './components/EditorCanvas';
 import { ComponentSidebar } from './components/ComponentSidebar';
 import { PropertyPanel } from './components/PropertyPanel';
 import { useEditorStore } from './store';
 import { DocumentAutosave, restoreDocument, scheduleDocumentChange } from './persistence';
 import './components/styles.css';
+
+const PanelResizeHandle = React.memo(
+  ({
+    label,
+    value,
+    onResize,
+    min,
+    max,
+    growDirection,
+  }: {
+    label: string;
+    value: number;
+    onResize: (width: number) => void;
+    min: number;
+    max: number;
+    growDirection: 'left' | 'right';
+  }) => {
+    const dragStart = useRef<{ x: number; width: number } | null>(null);
+    const resizeBy = (delta: number) => onResize(Math.min(max, Math.max(min, value + delta)));
+
+    return (
+      <div
+        className="panel-resize-handle"
+        role="separator"
+        aria-label={label}
+        aria-orientation="vertical"
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={Math.round(value)}
+        tabIndex={0}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          dragStart.current = { x: event.clientX, width: value };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const start = dragStart.current;
+          if (!start) return;
+          const direction = growDirection === 'left' ? 1 : -1;
+          onResize(
+            Math.min(max, Math.max(min, start.width + (event.clientX - start.x) * direction)),
+          );
+        }}
+        onPointerUp={() => {
+          dragStart.current = null;
+        }}
+        onPointerCancel={() => {
+          dragStart.current = null;
+        }}
+        onLostPointerCapture={() => {
+          dragStart.current = null;
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const grows =
+            (growDirection === 'left' && event.key === 'ArrowRight') ||
+            (growDirection === 'right' && event.key === 'ArrowLeft');
+          resizeBy(grows ? 20 : -20);
+        }}
+      />
+    );
+  },
+);
 
 export const EditorApp: React.FC = () => {
   const autosaveRef = useRef<DocumentAutosave | null>(null);
@@ -18,7 +82,22 @@ export const EditorApp: React.FC = () => {
   const redo = useEditorStore((state) => state.redo);
   const canUndo = useEditorStore((state) => state.pastDocuments.length > 0);
   const canRedo = useEditorStore((state) => state.futureDocuments.length > 0);
+  const updateDocumentTitle = useEditorStore((state) => state.updateDocumentTitle);
   const [previewMode, setPreviewMode] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(252);
+  const [inspectorWidth, setInspectorWidth] = useState(300);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [compactLayout, setCompactLayout] = useState(false);
+  const [renamingDocument, setRenamingDocument] = useState(false);
+  const [documentTitleDraft, setDocumentTitleDraft] = useState(document.metadata.title);
+  const [documentTitleError, setDocumentTitleError] = useState<string | null>(null);
+  const skipTitleBlurCommit = useRef(false);
+  const toggleSidebarCollapsed = useCallback(() => setSidebarCollapsed((current) => !current), []);
+  const toggleInspectorCollapsed = useCallback(
+    () => setInspectorCollapsed((current) => !current),
+    [],
+  );
 
   useEffect(() => {
     const autosave = new DocumentAutosave(() => window.localStorage, setSaveState);
@@ -65,7 +144,8 @@ export const EditorApp: React.FC = () => {
       if (
         target instanceof HTMLElement &&
         (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-      ) return;
+      )
+        return;
       if (!(event.metaKey || event.ctrlKey)) return;
       const key = event.key.toLowerCase();
       if (key === 'z') {
@@ -80,6 +160,44 @@ export const EditorApp: React.FC = () => {
     window.addEventListener('keydown', handleHistoryShortcut);
     return () => window.removeEventListener('keydown', handleHistoryShortcut);
   }, [redo, undo]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const updateCompactLayout = () => setCompactLayout(media.matches);
+    updateCompactLayout();
+    media.addEventListener('change', updateCompactLayout);
+    return () => media.removeEventListener('change', updateCompactLayout);
+  }, []);
+
+  const commitDocumentTitle = () => {
+    const title = documentTitleDraft.trim();
+    if (!title) {
+      setDocumentTitleError('Le nom du document ne peut pas être vide.');
+      return;
+    }
+    updateDocumentTitle(title);
+    setDocumentTitleDraft(title);
+    setDocumentTitleError(null);
+    setRenamingDocument(false);
+  };
+
+  const beginRenameDocument = useCallback(() => {
+    setDocumentTitleDraft(document.metadata.title);
+    setDocumentTitleError(null);
+    setRenamingDocument(true);
+  }, [document.metadata.title]);
+
+  const workspaceColumns = previewMode
+    ? 'minmax(0, 1fr)'
+    : compactLayout
+      ? 'minmax(0, 1fr)'
+      : [
+          sidebarCollapsed ? '44px' : `${sidebarWidth}px`,
+          ...(sidebarCollapsed ? [] : ['6px']),
+          'minmax(0, 1fr)',
+          ...(inspectorCollapsed ? [] : ['6px']),
+          inspectorCollapsed ? '44px' : `${inspectorWidth}px`,
+        ].join(' ');
 
   const saveStatusLabel = {
     idle: 'Not saved',
@@ -100,15 +218,87 @@ export const EditorApp: React.FC = () => {
     <div className={`editor-root${previewMode ? ' preview-mode' : ''}`}>
       <header className="editor-toolbar">
         <div className="editor-brand">
-          <span className="editor-brand-mark" aria-hidden="true">D</span>
+          <span className="editor-brand-mark" aria-hidden="true">
+            D
+          </span>
           <div>
             <h1>DSK Visual Engine</h1>
-            <p>Éditeur de page</p>
+            <p>Éditeur visuel</p>
           </div>
         </div>
         <div className="editor-document">
-          <span className="document-label">Document</span>
-          <strong title={document.metadata.title}>{document.metadata.title}</strong>
+          <span className="document-label">DOCUMENT</span>
+          {renamingDocument ? (
+            <div className="document-rename">
+              <input
+                autoFocus
+                aria-label="Nom du document"
+                aria-invalid={documentTitleError !== null}
+                aria-describedby={documentTitleError ? 'document-title-error' : undefined}
+                value={documentTitleDraft}
+                onChange={(event) => {
+                  setDocumentTitleDraft(event.target.value);
+                  setDocumentTitleError(null);
+                }}
+                onBlur={() => {
+                  if (skipTitleBlurCommit.current) {
+                    skipTitleBlurCommit.current = false;
+                    return;
+                  }
+                  commitDocumentTitle();
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitDocumentTitle();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    skipTitleBlurCommit.current = true;
+                    event.currentTarget.blur();
+                    setDocumentTitleDraft(document.metadata.title);
+                    setDocumentTitleError(null);
+                    setRenamingDocument(false);
+                  }
+                }}
+              />
+              {documentTitleError ? (
+                <span id="document-title-error" className="document-rename-error" role="alert">
+                  {documentTitleError}
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <button
+              className="document-name-button"
+              type="button"
+              title="Renommer le document"
+              aria-label={`Renommer le document : ${document.metadata.title}`}
+              onClick={beginRenameDocument}
+            >
+              <strong>{document.metadata.title}</strong>
+              <span aria-hidden="true">✎</span>
+            </button>
+          )}
+        </div>
+        <div className="editor-toolbar-center">
+          <div className="viewport-switcher" role="group" aria-label="Aperçu responsive">
+            {(
+              [
+                ['desktop', 'Desktop'],
+                ['tablet', 'Tablet'],
+                ['mobile', 'Mobile'],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={viewport === mode}
+                onClick={() => setViewport(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="editor-toolbar-actions">
           <div className="history-actions" role="group" aria-label="Historique du document">
@@ -133,61 +323,96 @@ export const EditorApp: React.FC = () => {
               ↷
             </button>
           </div>
-          <div className="save-indicator" role="status" aria-live="polite" data-status={saveState.status}>
+          <div
+            className="save-indicator"
+            role="status"
+            aria-live="polite"
+            data-status={saveState.status}
+          >
             <span className="save-indicator-dot" aria-hidden="true" />
             <span title={saveState.error ?? undefined}>{saveStatusLabel}</span>
-            {lastSavedLabel ? <time dateTime={saveState.lastSavedAt ?? undefined}>à {lastSavedLabel}</time> : null}
+            {lastSavedLabel ? (
+              <time dateTime={saveState.lastSavedAt ?? undefined}>à {lastSavedLabel}</time>
+            ) : null}
           </div>
           <button
             className="toolbar-button toolbar-button-primary"
             type="button"
+            title="Enregistrer maintenant"
             onClick={() => {
               autosaveRef.current?.saveNow(useEditorStore.getState().document);
             }}
           >
-            Save
+            Enregistrer
           </button>
           <button
             className={`toolbar-button${previewMode ? ' toolbar-button-primary' : ''}`}
             type="button"
             aria-pressed={previewMode}
+            title="Aperçu du document"
             onClick={() => setPreviewMode((current) => !current)}
           >
-            {previewMode ? 'Exit preview' : 'Preview'}
+            {previewMode ? 'Quitter l’aperçu' : 'Aperçu'}
           </button>
-          <button
-            className="toolbar-button"
-            type="button"
-            onClick={() => {
-              if (window.confirm('Réinitialiser la démo et perdre les modifications actuelles ?')) {
-                resetDemo();
-              }
-            }}
-          >
-            Reset demo
-          </button>
-          <div className="viewport-switcher" role="group" aria-label="Aperçu responsive">
-            {([
-              ['desktop', 'Desktop'],
-              ['tablet', 'Tablet'],
-              ['mobile', 'Mobile'],
-            ] as const).map(([mode, label]) => (
+          <details className="toolbar-menu">
+            <summary aria-label="Autres actions" title="Autres actions">
+              •••
+            </summary>
+            <div className="toolbar-menu-popover">
               <button
-                key={mode}
                 type="button"
-                aria-pressed={viewport === mode}
-                onClick={() => setViewport(mode)}
+                onClick={() => {
+                  if (
+                    window.confirm('Réinitialiser la démo et perdre les modifications actuelles ?')
+                  ) {
+                    resetDemo();
+                  }
+                }}
               >
-                {label}
+                Réinitialiser la démo
               </button>
-            ))}
-          </div>
+            </div>
+          </details>
         </div>
       </header>
-      <div className="editor-workspace">
-        <ComponentSidebar />
+      <div
+        className={`editor-workspace${compactLayout ? ' is-compact' : ''}`}
+        style={{ gridTemplateColumns: workspaceColumns }}
+      >
+        {!previewMode ? (
+          <ComponentSidebar
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebarCollapsed}
+            onRenameDocument={beginRenameDocument}
+          />
+        ) : null}
+        {!previewMode && !compactLayout && !sidebarCollapsed ? (
+          <PanelResizeHandle
+            label="Redimensionner le panneau de gauche"
+            value={sidebarWidth}
+            min={190}
+            max={380}
+            growDirection="left"
+            onResize={setSidebarWidth}
+          />
+        ) : null}
         <EditorCanvas preview={previewMode} />
-        <PropertyPanel />
+        {!previewMode && !compactLayout && !inspectorCollapsed ? (
+          <PanelResizeHandle
+            label="Redimensionner l’inspecteur"
+            value={inspectorWidth}
+            min={230}
+            max={440}
+            growDirection="right"
+            onResize={setInspectorWidth}
+          />
+        ) : null}
+        {!previewMode ? (
+          <PropertyPanel
+            collapsed={inspectorCollapsed}
+            onToggleCollapsed={toggleInspectorCollapsed}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -201,4 +426,10 @@ export {
   restoreDocument,
   saveDocument,
 } from './persistence';
-export type { RestoreResult, SaveState, SaveStatus, StorageLike, StorageProvider } from './persistence';
+export type {
+  RestoreResult,
+  SaveState,
+  SaveStatus,
+  StorageLike,
+  StorageProvider,
+} from './persistence';

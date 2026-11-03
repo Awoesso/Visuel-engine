@@ -17,8 +17,9 @@ export interface RenderComponentProps<T = Record<string, unknown>> {
   children?: React.ReactNode;
 }
 
-export type ReactComponentImplementation<T = Record<string, unknown>> =
-  React.ComponentType<RenderComponentProps<T>>;
+export type ReactComponentImplementation<T = Record<string, unknown>> = React.ComponentType<
+  RenderComponentProps<T>
+>;
 
 export type ComponentMapping =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +34,11 @@ export interface RendererContextValue {
   theme: ThemeTokens;
   viewport: ViewportMode;
   mode: RendererMode;
-  renderNode: (node: ComponentNode, currentDepth: number) => React.ReactNode;
+  renderNode: (
+    node: ComponentNode,
+    currentDepth: number,
+    inheritedLocked?: boolean,
+  ) => React.ReactNode;
   renderSection: (section: SectionNode, index: number) => React.ReactNode;
   fallbackComponent?: React.ComponentType<{ node?: ComponentNode; error?: Error }>;
 }
@@ -44,7 +49,11 @@ export interface PageRendererProps {
   validate?: boolean;
   viewport?: ViewportMode;
   mode?: RendererMode;
-  renderNode?: (node: ComponentNode, renderedNode: React.ReactNode) => React.ReactNode;
+  renderNode?: (
+    node: ComponentNode,
+    renderedNode: React.ReactNode,
+    inheritedLocked?: boolean,
+  ) => React.ReactNode;
   fallbackComponent?: React.ComponentType<{ node?: ComponentNode; error?: Error }>;
   className?: string;
   style?: React.CSSProperties;

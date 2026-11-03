@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { ComponentNode, ElementStyles, PropertyControl } from '@dsk/core';
 import { getDefaultComponent } from '../constants';
-import { useEditorStore, type ViewportMode } from '../store';
+import { isNodeEffectivelyLocked, useEditorStore, type ViewportMode } from '../store';
 
 function findNode(nodes: ComponentNode[], nodeId: string): ComponentNode | undefined {
   for (const node of nodes) {
@@ -446,139 +446,191 @@ function updateResponsiveStyle(
   onChange({ [key]: value });
 }
 
-export const PropertyPanel: React.FC = () => {
-  const document = useEditorStore((state) => state.document);
-  const selectedNodeId = useEditorStore((state) => state.selectedNodeId);
-  const updateNodeProps = useEditorStore((state) => state.updateNodeProps);
-  const updateNodeStyles = useEditorStore((state) => state.updateNodeStyles);
-  const viewport = useEditorStore((state) => state.viewport);
-  const selectedNode = selectedNodeId
-    ? document.sections
-        .map((section) => findNode(section.children, selectedNodeId))
-        .find((node) => node !== undefined)
-    : undefined;
-  const definition = selectedNode ? getDefaultComponent(selectedNode.type) : undefined;
+export const PropertyPanel = React.memo(
+  ({
+    collapsed = false,
+    onToggleCollapsed,
+  }: {
+    collapsed?: boolean;
+    onToggleCollapsed?: () => void;
+  }) => {
+    const document = useEditorStore((state) => state.document);
+    const selectedNodeId = useEditorStore((state) => state.selectedNodeId);
+    const updateNodeProps = useEditorStore((state) => state.updateNodeProps);
+    const updateNodeStyles = useEditorStore((state) => state.updateNodeStyles);
+    const viewport = useEditorStore((state) => state.viewport);
+    const selectedNode = selectedNodeId
+      ? document.sections
+          .map((section) => findNode(section.children, selectedNodeId))
+          .find((node) => node !== undefined)
+      : undefined;
+    const definition = selectedNode ? getDefaultComponent(selectedNode.type) : undefined;
+    const selectedNodeLocked = selectedNode
+      ? isNodeEffectivelyLocked(document, selectedNode.id)
+      : false;
 
-  return (
-    <aside className="editor-properties" aria-label="Panneau de propriétés">
-      <div className="panel-heading">
-        <span className="panel-eyebrow">INSPECTEUR</span>
-        <h2>Propriétés</h2>
-      </div>
-      {!selectedNode ? (
-        <p className="panel-empty">
-          Sélectionnez un composant sur le canvas pour modifier ses propriétés.
-        </p>
-      ) : (
-        <>
-          <div className="selected-component">
-            <strong>{definition?.label ?? selectedNode.type}</strong>
-            <code>{selectedNode.id}</code>
+    if (collapsed) {
+      return (
+        <aside className="editor-properties is-collapsed" aria-label="Inspecteur">
+          <button
+            type="button"
+            className="panel-expand-button"
+            aria-label="Développer l’inspecteur"
+            title="Développer l’inspecteur"
+            onClick={onToggleCollapsed}
+          >
+            ‹
+          </button>
+        </aside>
+      );
+    }
+
+    return (
+      <aside
+        className="editor-properties"
+        aria-label="Panneau de propriétés"
+        id="editor-right-panel"
+      >
+        <div className="panel-heading">
+          <div>
+            <span className="panel-eyebrow">INSPECTEUR</span>
+            <h2>Propriétés</h2>
           </div>
-          {definition ? (
-            <>
-              {(['content', 'layout', 'style'] as const).map((category) => {
-                const controls = Object.entries(definition.controls).filter(
-                  ([, control]) => control.category === category,
-                );
-                if (controls.length === 0) return null;
-                const title =
-                  category === 'content'
-                    ? 'Content'
-                    : category === 'layout'
-                      ? 'Layout'
-                      : 'Appearance';
-                return (
-                  <details className="property-group" key={category} open>
-                    <summary>{title}</summary>
-                    {controls.map(([name, control]) => (
-                      <PropertyInput
-                        key={name}
-                        name={name}
-                        control={control}
-                        value={selectedNode.props[name] ?? control.defaultValue ?? ''}
-                        onChange={(value) => updateNodeProps(selectedNode.id, { [name]: value })}
-                      />
-                    ))}
+          <button
+            type="button"
+            className="panel-collapse-button"
+            aria-label="Réduire l’inspecteur"
+            title="Réduire l’inspecteur"
+            onClick={onToggleCollapsed}
+          >
+            ›
+          </button>
+        </div>
+        {!selectedNode ? (
+          <p className="panel-empty">
+            Sélectionnez un composant sur le canvas pour modifier ses propriétés.
+          </p>
+        ) : (
+          <>
+            <div className="selected-component">
+              <strong>{selectedNode.name ?? definition?.label ?? selectedNode.type}</strong>
+              {selectedNode.name ? <small>{definition?.label ?? selectedNode.type}</small> : null}
+              <code>{selectedNode.id}</code>
+            </div>
+            {selectedNodeLocked ? (
+              <p className="locked-node-message" role="status">
+                Cet élément ou son groupe parent est verrouillé.
+              </p>
+            ) : null}
+            <fieldset className="property-controls" disabled={selectedNodeLocked}>
+              {definition ? (
+                <>
+                  {(['content', 'layout', 'style'] as const).map((category) => {
+                    const controls = Object.entries(definition.controls).filter(
+                      ([, control]) => control.category === category,
+                    );
+                    if (controls.length === 0) return null;
+                    const title =
+                      category === 'content'
+                        ? 'Content'
+                        : category === 'layout'
+                          ? 'Layout'
+                          : 'Appearance';
+                    return (
+                      <details className="property-group" key={category} open>
+                        <summary>{title}</summary>
+                        {controls.map(([name, control]) => (
+                          <PropertyInput
+                            key={name}
+                            name={name}
+                            control={control}
+                            value={selectedNode.props[name] ?? control.defaultValue ?? ''}
+                            onChange={(value) =>
+                              updateNodeProps(selectedNode.id, { [name]: value })
+                            }
+                          />
+                        ))}
+                      </details>
+                    );
+                  })}
+                  <details className="property-group" open>
+                    <summary>Layout · {viewport}</summary>
+                    <ResponsiveStyleFields
+                      node={selectedNode}
+                      viewport={viewport}
+                      fields={LAYOUT_FIELDS}
+                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                    />
                   </details>
-                );
-              })}
-              <details className="property-group" open>
-                <summary>Layout · {viewport}</summary>
-                <ResponsiveStyleFields
-                  node={selectedNode}
-                  viewport={viewport}
-                  fields={LAYOUT_FIELDS}
-                  onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
-                />
-              </details>
-              <details className="property-group" open>
-                <summary>Spacing · {viewport}</summary>
-                <ResponsiveStyleFields
-                  node={selectedNode}
-                  viewport={viewport}
-                  fields={SPACING_FIELDS}
-                  onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
-                />
-              </details>
-              <details className="property-group">
-                <summary>Typography</summary>
-                <ResponsiveStyleFields
-                  node={selectedNode}
-                  viewport={viewport}
-                  fields={TYPOGRAPHY_FIELDS}
-                  onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
-                />
-              </details>
-              <details className="property-group">
-                <summary>Appearance · {viewport}</summary>
-                <ResponsiveStyleFields
-                  node={selectedNode}
-                  viewport={viewport}
-                  fields={APPEARANCE_FIELDS}
-                  onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
-                />
-                <label className="property-field">
-                  <span>Opacity</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={selectedNode.styles[viewport].opacity ?? 1}
-                    onChange={(event) =>
-                      updateNodeStyles(selectedNode.id, viewport, {
-                        opacity: Number(event.target.value),
-                      })
-                    }
-                  />
-                  {selectedNode.styles[viewport].opacity !== undefined ? (
-                    <button
-                      type="button"
-                      className="property-reset"
-                      onClick={() =>
-                        updateNodeStyles(selectedNode.id, viewport, { opacity: undefined })
-                      }
-                    >
-                      Reset
-                    </button>
-                  ) : null}
-                </label>
-              </details>
-              <details className="property-group">
-                <summary>Advanced</summary>
-                <p className="advanced-node-id">
-                  Node ID <code>{selectedNode.id}</code>
+                  <details className="property-group" open>
+                    <summary>Spacing · {viewport}</summary>
+                    <ResponsiveStyleFields
+                      node={selectedNode}
+                      viewport={viewport}
+                      fields={SPACING_FIELDS}
+                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                    />
+                  </details>
+                  <details className="property-group">
+                    <summary>Typography</summary>
+                    <ResponsiveStyleFields
+                      node={selectedNode}
+                      viewport={viewport}
+                      fields={TYPOGRAPHY_FIELDS}
+                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                    />
+                  </details>
+                  <details className="property-group">
+                    <summary>Appearance · {viewport}</summary>
+                    <ResponsiveStyleFields
+                      node={selectedNode}
+                      viewport={viewport}
+                      fields={APPEARANCE_FIELDS}
+                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                    />
+                    <label className="property-field">
+                      <span>Opacity</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={selectedNode.styles[viewport].opacity ?? 1}
+                        onChange={(event) =>
+                          updateNodeStyles(selectedNode.id, viewport, {
+                            opacity: Number(event.target.value),
+                          })
+                        }
+                      />
+                      {selectedNode.styles[viewport].opacity !== undefined ? (
+                        <button
+                          type="button"
+                          className="property-reset"
+                          onClick={() =>
+                            updateNodeStyles(selectedNode.id, viewport, { opacity: undefined })
+                          }
+                        >
+                          Reset
+                        </button>
+                      ) : null}
+                    </label>
+                  </details>
+                  <details className="property-group">
+                    <summary>Advanced</summary>
+                    <p className="advanced-node-id">
+                      Node ID <code>{selectedNode.id}</code>
+                    </p>
+                  </details>
+                </>
+              ) : (
+                <p className="panel-empty">
+                  Aucun panneau de propriétés n’est défini pour ce composant.
                 </p>
-              </details>
-            </>
-          ) : (
-            <p className="panel-empty">
-              Aucun panneau de propriétés n’est défini pour ce composant.
-            </p>
-          )}
-        </>
-      )}
-    </aside>
-  );
-};
+              )}
+            </fieldset>
+          </>
+        )}
+      </aside>
+    );
+  },
+);

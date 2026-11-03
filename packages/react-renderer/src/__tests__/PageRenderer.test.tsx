@@ -13,9 +13,9 @@ const HeadingComponent: React.FC<RenderComponentProps<{ text: string; level?: nu
   return <h1>{props.text}</h1>;
 };
 
-const ButtonComponent: React.FC<
-  RenderComponentProps<{ label: string; url?: string }>
-> = ({ props }) => {
+const ButtonComponent: React.FC<RenderComponentProps<{ label: string; url?: string }>> = ({
+  props,
+}) => {
   return (
     <a href={props.url || '#'} data-testid="button-element">
       {props.label}
@@ -23,9 +23,7 @@ const ButtonComponent: React.FC<
   );
 };
 
-const ContainerComponent: React.FC<RenderComponentProps<{ padding?: string }>> = ({
-  children,
-}) => {
+const ContainerComponent: React.FC<RenderComponentProps<{ padding?: string }>> = ({ children }) => {
   return <div data-testid="container-wrapper">{children}</div>;
 };
 
@@ -85,6 +83,144 @@ describe('PageRenderer', () => {
     expect(button.getAttribute('href')).toBe('https://example.com/catalog');
   });
 
+  it('passes inherited lock state through sections and nested nodes', () => {
+    const document = PageDocumentSchema.parse({
+      id: 'doc-locks',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      metadata: { title: 'Lock state test' },
+      theme: {},
+      sections: [
+        {
+          id: 'section-unlocked',
+          type: 'section',
+          name: 'Unlocked section',
+          children: [
+            {
+              id: 'container-locked',
+              type: 'core/container',
+              props: {},
+              children: [{ id: 'heading-child', type: 'core/heading', props: { text: 'Locked' } }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = render(
+      <PageRenderer
+        document={document}
+        registry={testRegistry}
+        validate={false}
+        renderNode={(node, renderedNode, inheritedLocked) => (
+          <div data-testid={`node-${node.id}`} data-inherited-locked={inheritedLocked}>
+            {renderedNode}
+          </div>
+        )}
+      />,
+    );
+
+    expect(screen.getByTestId('node-container-locked').dataset.inheritedLocked).toBe('false');
+    expect(screen.getByTestId('node-heading-child').dataset.inheritedLocked).toBe('false');
+
+    const section = document.sections[0]!;
+    const container = section.children[0]!;
+    const lockedDocument = {
+      ...document,
+      sections: [
+        {
+          ...section,
+          children: [{ ...container, locked: true }],
+        },
+      ],
+    };
+    view.rerender(
+      <PageRenderer
+        document={lockedDocument}
+        registry={testRegistry}
+        validate={false}
+        renderNode={(node, renderedNode, inheritedLocked) => (
+          <div data-testid={`node-${node.id}`} data-inherited-locked={inheritedLocked}>
+            {renderedNode}
+          </div>
+        )}
+      />,
+    );
+    expect(screen.getByTestId('node-heading-child').dataset.inheritedLocked).toBe('true');
+
+    const sectionLockedDocument = {
+      ...lockedDocument,
+      sections: [{ ...lockedDocument.sections[0]!, locked: true }],
+    };
+    view.rerender(
+      <PageRenderer
+        document={sectionLockedDocument}
+        registry={testRegistry}
+        validate={false}
+        renderNode={(node, renderedNode, inheritedLocked) => (
+          <div data-testid={`node-${node.id}`} data-inherited-locked={inheritedLocked}>
+            {renderedNode}
+          </div>
+        )}
+      />,
+    );
+    expect(screen.getByTestId('node-container-locked').dataset.inheritedLocked).toBe('true');
+  });
+
+  it('skips unchanged component renders when a trusted document edit changes one node', () => {
+    const headingRenders = vi.fn();
+    const buttonRenders = vi.fn();
+    const CountedHeading: React.FC<RenderComponentProps<{ text: string }>> = ({ props }) => {
+      headingRenders();
+      return <h1>{props.text}</h1>;
+    };
+    const CountedButton: React.FC<RenderComponentProps<{ label: string }>> = ({ props }) => {
+      buttonRenders();
+      return <button>{props.label}</button>;
+    };
+    const registry: ComponentMapping = {
+      'core/heading': CountedHeading,
+      'core/button': CountedButton,
+    };
+    const document = PageDocumentSchema.parse({
+      id: 'doc-render-counts',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      metadata: { title: 'Render count test' },
+      theme: {},
+      sections: [
+        {
+          id: 'section-render-counts',
+          type: 'section',
+          name: 'Main',
+          children: [
+            { id: 'heading-render-counts', type: 'core/heading', props: { text: 'Before' } },
+            { id: 'button-render-counts', type: 'core/button', props: { label: 'Keep' } },
+          ],
+        },
+      ],
+    });
+
+    const view = render(<PageRenderer document={document} registry={registry} validate={false} />);
+    const section = document.sections[0]!;
+    const heading = section.children[0]!;
+    const updatedDocument = {
+      ...document,
+      sections: [
+        {
+          ...section,
+          children: [
+            { ...heading, props: { ...heading.props, text: 'After' } },
+            section.children[1]!,
+          ],
+        },
+      ],
+    };
+    view.rerender(<PageRenderer document={updatedDocument} registry={registry} validate={false} />);
+
+    expect(screen.getByText('After')).toBeDefined();
+    expect(headingRenders).toHaveBeenCalledTimes(2);
+    expect(buttonRenders).toHaveBeenCalledTimes(1);
+  });
+
   it('should render an informative fallback when encountering unknown component types in preview mode', () => {
     const docWithUnknown = PageDocumentSchema.parse({
       id: 'doc-unknown',
@@ -107,19 +243,14 @@ describe('PageRenderer', () => {
       ],
     });
 
-    render(
-      <PageRenderer
-        document={docWithUnknown}
-        registry={testRegistry}
-        mode="preview"
-      />,
-    );
+    render(<PageRenderer document={docWithUnknown} registry={testRegistry} mode="preview" />);
 
     expect(screen.getByText('Unregistered Component Type')).toBeDefined();
     expect(screen.getByText(/third-party\/carousel/)).toBeDefined();
   });
 
-  it('should isolate component errors with SafeErrorBoundary and not break surrounding nodes', () => { vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('should isolate component errors with SafeErrorBoundary and not break surrounding nodes', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const docWithCrash = PageDocumentSchema.parse({
       id: 'doc-crash',
       schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -169,9 +300,7 @@ describe('PageRenderer', () => {
       sections: [],
     });
 
-    const { container } = render(
-      <PageRenderer document={docWithTheme} registry={testRegistry} />,
-    );
+    const { container } = render(<PageRenderer document={docWithTheme} registry={testRegistry} />);
 
     const mainEl = container.querySelector('main');
     expect(mainEl).toBeDefined();
