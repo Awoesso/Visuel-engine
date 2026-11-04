@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { CollapsibleSection } from './ui/CollapsibleSection';
+import { ViewportSelector } from './ui/ViewportSelector';
 import type { ComponentNode, ElementStyles, PropertyControl } from '@dsk/core';
 import { getDefaultComponent } from '../constants';
 import { isNodeEffectivelyLocked, useEditorStore, type ViewportMode } from '../store';
