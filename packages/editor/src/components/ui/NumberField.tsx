@@ -58,7 +58,7 @@ export const NumberField: React.FC<NumberFieldProps> = ({
           min={min}
           max={max}
           step={step}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
           onBlur={() => commit(draft, unit)}
           width="70%"
         />

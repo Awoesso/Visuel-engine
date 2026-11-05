@@ -1,6 +1,6 @@
 import React from 'react';
 import { Radio, RadioGroup } from '@geist-ui/core';
-import { useEditorStore } from '../store';
+import { useEditorStore } from '../../store';
 
 export const ViewportSelector: React.FC = () => {
   const viewport = useEditorStore((s) => s.viewport);

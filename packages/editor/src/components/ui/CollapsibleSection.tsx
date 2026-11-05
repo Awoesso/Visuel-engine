@@ -1,5 +1,5 @@
 import React, { useState, PropsWithChildren } from 'react';
-import { Tooltip } from '@geist-ui/core';
+
 
 export interface CollapsibleSectionProps {
   title: string;
