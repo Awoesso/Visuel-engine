@@ -30,11 +30,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@dsk/components": "workspace:*",
     "@dsk/core": "workspace:*",
     "@dsk/react-renderer": "workspace:*",
-    "@dsk/components": "workspace:*",
     "@dsk/templates": "workspace:*",
     "immer": "^10.1.1",
+    "lucide-react": "^1.70.0",
     "zustand": "^4.5.0"
   },
   "peerDependencies": {
@@ -42,10 +43,10 @@
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "vite": "^5.4.2",
-    "tsup": "^8.5.1",
     "@types/react": "^19.0.2",
-    "@types/react-dom": "^19.0.2"
+    "@types/react-dom": "^19.0.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.2"
   }
 }

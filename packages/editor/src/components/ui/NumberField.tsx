@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Input, Select, Tooltip } from '@geist-ui/core';
 
 export interface NumberFieldProps {
   label: string;
@@ -23,23 +22,25 @@ export const NumberField: React.FC<NumberFieldProps> = ({
   unitOptions = ['px', 'rem', '%'],
 }) => {
   const [draft, setDraft] = useState(value);
-  const [unit, setUnit] = useState(() => {
+  const [unit, setUnit] = useState<string>(() => {
     const m = value.match(/([a-z%]+)$/i);
-    return m ? m[1] : 'px';
+    return m?.[1] ?? 'px';
   });
   const numeric = value.replace(/[^0-9.-]/g, '');
 
   useEffect(() => {
     setDraft(numeric);
     const m = value.match(/([a-z%]+)$/i);
-    if (m) setUnit(m[1]);
-  }, [value]);
+    if (m?.[1]) setUnit(m[1]);
+  }, [value, numeric]);
 
   const commit = (newNum: string, newUnit: string) => {
     if (newNum === '' && newUnit === '') {
       onChange('');
     } else if (newNum === '' && newUnit === 'auto') {
       onChange('auto');
+    } else if (newNum === '') {
+      onChange('');
     } else {
       onChange(`${newNum}${newUnit}`);
     }
@@ -47,35 +48,38 @@ export const NumberField: React.FC<NumberFieldProps> = ({
 
   return (
     <div className="number-field">
-      <Tooltip text={label} placement="topLeft">
-        <span>{label}</span>
-      </Tooltip>
-      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-        <Input
+      <span className="number-field-label" title={label}>
+        {label}
+      </span>
+      <div className="number-field-controls">
+        <input
           type="number"
+          className="number-field-input"
           value={draft}
           placeholder={placeholder}
           min={min}
           max={max}
           step={step}
+          aria-label={label}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
           onBlur={() => commit(draft, unit)}
-          width="70%"
         />
-        <Select
+        <select
+          className="number-field-unit"
           value={unit}
-          onChange={(val) => {
-            setUnit(val as string);
-            commit(draft, val as string);
+          aria-label={`Unité pour ${label}`}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+            const nextUnit = e.target.value;
+            setUnit(nextUnit);
+            commit(draft, nextUnit);
           }}
-          width="30%"
         >
           {unitOptions.map((u) => (
-            <Select.Option key={u} value={u}>
+            <option key={u} value={u}>
               {u}
-            </Select.Option>
+            </option>
           ))}
-        </Select>
+        </select>
       </div>
     </div>
   );

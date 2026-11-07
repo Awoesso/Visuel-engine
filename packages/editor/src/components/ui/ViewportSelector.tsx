@@ -1,23 +1,29 @@
 import React from 'react';
-import { Radio, RadioGroup } from '@geist-ui/core';
-import { useEditorStore } from '../../store';
+import { useEditorStore, type ViewportMode } from '../../store';
 
 export const ViewportSelector: React.FC = () => {
   const viewport = useEditorStore((s) => s.viewport);
   const setViewport = useEditorStore((s) => s.setViewport);
 
+  const options: { id: ViewportMode; label: string }[] = [
+    { id: 'desktop', label: 'Desktop' },
+    { id: 'tablet', label: 'Tablet' },
+    { id: 'mobile', label: 'Mobile' },
+  ];
+
   return (
-    <div className="viewport-selector" style={{ marginBottom: '0.8rem' }}>
-      <RadioGroup
-        value={viewport}
-        onChange={(v) => setViewport(v as any)}
-        type="success"
-        size="small"
-      >
-        <Radio value="desktop">Desktop</Radio>
-        <Radio value="tablet">Tablet</Radio>
-        <Radio value="mobile">Mobile</Radio>
-      </RadioGroup>
+    <div className="viewport-selector" role="group" aria-label="Sélecteur de viewport">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={`viewport-btn ${viewport === option.id ? 'active' : ''}`}
+          onClick={() => setViewport(option.id)}
+          aria-pressed={viewport === option.id}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 };

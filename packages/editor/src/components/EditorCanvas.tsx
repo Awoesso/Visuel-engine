@@ -5,6 +5,20 @@ import type { ComponentNode, PageDocument } from '@dsk/core';
 import { getDefaultComponent } from '../constants';
 import { useEditorStore } from '../store';
 import { FallbackComponent } from '../fallback';
+import {
+  MousePointer,
+  Square,
+  Type,
+  MousePointerClick,
+  Image as ImageIcon,
+  Hand,
+  Monitor,
+  Tablet,
+  Smartphone,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 
 type DropPosition = 'before' | 'after' | 'inside';
 type DropHint = {
@@ -225,6 +239,10 @@ export const EditorCanvas = React.memo(({ preview = false }: { preview?: boolean
     return () => window.cancelAnimationFrame(frame);
   }, [viewport]);
 
+  const addComponent = useEditorStore((state) => state.addComponent);
+  const setViewport = useEditorStore((state) => state.setViewport);
+  const [activeTool, setActiveTool] = useState<'pointer' | 'hand'>('pointer');
+
   const fitCanvas = () => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -419,6 +437,149 @@ export const EditorCanvas = React.memo(({ preview = false }: { preview?: boolean
           />
         </div>
       </div>
+
+      {/* Floating Bottom Toolbar (Figma Style) */}
+      {!preview && (
+        <div
+          className="figma-floating-toolbar"
+          role="toolbar"
+          aria-label="Barre d'outils flottante"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Tool: Pointer */}
+          <button
+            type="button"
+            className={`figma-floating-tool-btn ${activeTool === 'pointer' ? 'is-active' : ''}`}
+            title="Outil Sélection (V)"
+            aria-label="Outil Sélection"
+            onClick={() => setActiveTool('pointer')}
+          >
+            <MousePointer size={15} />
+          </button>
+
+          {/* Tool: Hand / Pan */}
+          <button
+            type="button"
+            className={`figma-floating-tool-btn ${activeTool === 'hand' ? 'is-active' : ''}`}
+            title="Outil Déplacement (H)"
+            aria-label="Outil Déplacement"
+            onClick={() => setActiveTool('hand')}
+          >
+            <Hand size={15} />
+          </button>
+
+          <div className="figma-floating-divider" />
+
+          {/* Quick Insert: Container */}
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Ajouter un Conteneur / Rectangle (R)"
+            aria-label="Ajouter un Conteneur"
+            onClick={() => addComponent('core/container')}
+          >
+            <Square size={15} />
+          </button>
+
+          {/* Quick Insert: Text */}
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Ajouter un Texte (T)"
+            aria-label="Ajouter un Texte"
+            onClick={() => addComponent('core/text')}
+          >
+            <Type size={15} />
+          </button>
+
+          {/* Quick Insert: Button */}
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Ajouter un Bouton"
+            aria-label="Ajouter un Bouton"
+            onClick={() => addComponent('core/button')}
+          >
+            <MousePointerClick size={15} />
+          </button>
+
+          {/* Quick Insert: Image */}
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Ajouter une Image"
+            aria-label="Ajouter une Image"
+            onClick={() => addComponent('core/image')}
+          >
+            <ImageIcon size={15} />
+          </button>
+
+          <div className="figma-floating-divider" />
+
+          {/* Responsive Viewports */}
+          <button
+            type="button"
+            className={`figma-floating-tool-btn ${viewport === 'desktop' ? 'is-active' : ''}`}
+            title="Mode Ordinateur (Desktop)"
+            aria-label="Mode Ordinateur"
+            onClick={() => setViewport('desktop')}
+          >
+            <Monitor size={15} />
+          </button>
+          <button
+            type="button"
+            className={`figma-floating-tool-btn ${viewport === 'tablet' ? 'is-active' : ''}`}
+            title="Mode Tablette"
+            aria-label="Mode Tablette"
+            onClick={() => setViewport('tablet')}
+          >
+            <Tablet size={15} />
+          </button>
+          <button
+            type="button"
+            className={`figma-floating-tool-btn ${viewport === 'mobile' ? 'is-active' : ''}`}
+            title="Mode Mobile"
+            aria-label="Mode Mobile"
+            onClick={() => setViewport('mobile')}
+          >
+            <Smartphone size={15} />
+          </button>
+
+          <div className="figma-floating-divider" />
+
+          {/* Zoom controls */}
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Zoom arrière"
+            aria-label="Zoom arrière"
+            onClick={() => setZoom(zoom - 0.1)}
+          >
+            <ZoomOut size={14} />
+          </button>
+          <span className="figma-floating-zoom-label" aria-live="polite">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Zoom avant"
+            aria-label="Zoom avant"
+            onClick={() => setZoom(zoom + 0.1)}
+          >
+            <ZoomIn size={14} />
+          </button>
+          <button
+            type="button"
+            className="figma-floating-tool-btn"
+            title="Ajuster à l'écran (Fit)"
+            aria-label="Ajuster à l'écran"
+            onClick={fitCanvas}
+          >
+            <Maximize2 size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 });

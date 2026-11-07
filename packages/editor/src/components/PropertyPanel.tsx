@@ -1,471 +1,80 @@
-import React, { useEffect, useState } from 'react';
-
-
-import type { ComponentNode, ElementStyles, PropertyControl } from '@dsk/core';
+import React, { useState } from 'react';
+import type { ComponentNode, ElementStyles } from '@dsk/core';
 import { getDefaultComponent } from '../constants';
-import { isNodeEffectivelyLocked, useEditorStore, type ViewportMode } from '../store';
+import { isNodeEffectivelyLocked, useEditorStore } from '../store';
+import { FillEditor } from './ui/FillEditor';
+import { SpacingBox } from './ui/SpacingBox';
+import {
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignVerticalJustifyStart,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  ArrowRight,
+  ArrowDown,
+  ChevronRight,
+  ChevronDown,
+  Box,
+  Layers,
+} from 'lucide-react';
 
 function findNode(nodes: ComponentNode[], nodeId: string): ComponentNode | undefined {
   for (const node of nodes) {
-    if (node.id === nodeId) {
-      return node;
-    }
-
+    if (node.id === nodeId) return node;
     const childMatch = findNode(node.children, nodeId);
-    if (childMatch) {
-      return childMatch;
-    }
+    if (childMatch) return childMatch;
   }
-
   return undefined;
 }
 
-function PropertyInput({
-  name,
-  control,
-  value,
-  onChange,
-}: {
-  name: string;
-  control: PropertyControl;
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  const inputId = `property-${name}`;
-  const stringValue = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-  const [numberDraft, setNumberDraft] = useState(stringValue);
-  const [numberError, setNumberError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setNumberDraft(stringValue);
-    setNumberError(null);
-  }, [stringValue]);
-
-  let input: React.ReactNode;
-  switch (control.type) {
-    case 'textarea':
-      input = (
-        <textarea
-          id={inputId}
-          value={stringValue}
-          placeholder={control.placeholder}
-          onChange={(event) => onChange(event.target.value)}
-          rows={4}
-        />
-      );
-      break;
-    case 'select':
-      input = (
-        <select
-          id={inputId}
-          value={stringValue}
-          onChange={(event) => {
-            const option = control.options?.find(
-              (candidate) => String(candidate.value) === event.target.value,
-            );
-            onChange(option?.value ?? event.target.value);
-          }}
-        >
-          {(control.options ?? []).map((option) => (
-            <option key={String(option.value)} value={String(option.value)}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      );
-      break;
-    case 'boolean':
-      input = (
-        <input
-          id={inputId}
-          type="checkbox"
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-      );
-      break;
-    case 'number':
-      input = (
-        <input
-          id={inputId}
-          type="number"
-          value={numberDraft}
-          min={control.min}
-          max={control.max}
-          step={control.step}
-          placeholder={control.placeholder}
-          aria-invalid={numberError !== null}
-          aria-describedby={numberError ? `${inputId}-error` : undefined}
-          onChange={(event) => {
-            const draft = event.target.value;
-            setNumberDraft(draft);
-            if (draft === '') {
-              setNumberError(null);
-              return;
-            }
-
-            const numericValue = Number(draft);
-            const inRange =
-              Number.isFinite(numericValue) &&
-              (control.min === undefined || numericValue >= control.min) &&
-              (control.max === undefined || numericValue <= control.max);
-            const matchesStep =
-              control.step === undefined ||
-              Number.isInteger((numericValue - (control.min ?? 0)) / control.step);
-            if (inRange && matchesStep) {
-              setNumberError(null);
-              onChange(numericValue);
-            } else {
-              setNumberError('Saisissez une valeur numérique valide.');
-            }
-          }}
-          onBlur={() => {
-            if (numberDraft === '' || numberError !== null) {
-              setNumberDraft(stringValue);
-              setNumberError(null);
-            }
-          }}
-        />
-      );
-      break;
-    case 'color':
-      input = (
-        <input
-          id={inputId}
-          type="color"
-          value={/^#[0-9a-f]{6}$/i.test(stringValue) ? stringValue : '#000000'}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      );
-      break;
-    case 'image':
-    case 'url':
-      input = (
-        <input
-          id={inputId}
-          type="url"
-          value={stringValue}
-          placeholder={control.placeholder}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      );
-      break;
-    case 'icon':
-    case 'text':
-      input = (
-        <input
-          id={inputId}
-          type="text"
-          value={stringValue}
-          placeholder={control.placeholder}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      );
-      break;
-  }
-
-  return (
-    <label className="property-field" htmlFor={inputId}>
-      <span>{control.label}</span>
-      {input}
-      {control.type === 'number' && numberError ? (
-        <small className="property-error" id={`${inputId}-error`} role="alert">
-          {numberError}
-        </small>
-      ) : null}
-      {control.description ? <small>{control.description}</small> : null}
-    </label>
-  );
-}
-
-type StyleFieldKey = Exclude<keyof ElementStyles, 'custom' | 'opacity'>;
-
-const SPACING_FIELDS = [
-  ['width', 'Width'],
-  ['height', 'Height'],
-  ['minWidth', 'Min width'],
-  ['maxWidth', 'Max width'],
-  ['minHeight', 'Min height'],
-  ['maxHeight', 'Max height'],
-  ['paddingTop', 'Padding top'],
-  ['paddingRight', 'Padding right'],
-  ['paddingBottom', 'Padding bottom'],
-  ['paddingLeft', 'Padding left'],
-  ['marginTop', 'Margin top'],
-  ['marginRight', 'Margin right'],
-  ['marginBottom', 'Margin bottom'],
-  ['marginLeft', 'Margin left'],
-  ['gap', 'Gap'],
-] as const satisfies readonly (readonly [StyleFieldKey, string])[];
-
-const TYPOGRAPHY_FIELDS = [
-  ['fontSize', 'Font size'],
-  ['fontWeight', 'Font weight'],
-  ['lineHeight', 'Line height'],
-  ['letterSpacing', 'Letter spacing'],
-  ['textAlign', 'Text alignment'],
-  ['textDecoration', 'Text decoration'],
-  ['color', 'Text color'],
-] as const satisfies readonly (readonly [StyleFieldKey, string])[];
-
-const APPEARANCE_FIELDS = [
-  ['backgroundColor', 'Background color'],
-  ['borderWidth', 'Border width'],
-  ['borderColor', 'Border color'],
-  ['borderStyle', 'Border style'],
-  ['borderRadius', 'Border radius'],
-  ['boxShadow', 'Box shadow'],
-] as const satisfies readonly (readonly [StyleFieldKey, string])[];
-
-const LAYOUT_FIELDS = [
-  ['display', 'Display'],
-  ['flexDirection', 'Flex direction'],
-  ['justifyContent', 'Justify content'],
-  ['alignItems', 'Align items'],
-  ['flexWrap', 'Flex wrap'],
-  ['gridTemplateColumns', 'Grid columns'],
-  ['gridTemplateRows', 'Grid rows'],
-] as const satisfies readonly (readonly [StyleFieldKey, string])[];
-
-const SELECT_OPTIONS: Partial<Record<StyleFieldKey, readonly { label: string; value: string }[]>> =
-  {
-    textAlign: [
-      { label: 'Inherit', value: '' },
-      { label: 'Left', value: 'left' },
-      { label: 'Center', value: 'center' },
-      { label: 'Right', value: 'right' },
-      { label: 'Justify', value: 'justify' },
-    ],
-    textDecoration: [
-      { label: 'None', value: 'none' },
-      { label: 'Underline', value: 'underline' },
-      { label: 'Line through', value: 'line-through' },
-    ],
-    display: [
-      { label: 'Inherit', value: '' },
-      { label: 'Block', value: 'block' },
-      { label: 'Inline block', value: 'inline-block' },
-      { label: 'Flex', value: 'flex' },
-      { label: 'Inline flex', value: 'inline-flex' },
-      { label: 'Grid', value: 'grid' },
-      { label: 'None', value: 'none' },
-    ],
-    flexDirection: [
-      { label: 'Row', value: 'row' },
-      { label: 'Row reverse', value: 'row-reverse' },
-      { label: 'Column', value: 'column' },
-      { label: 'Column reverse', value: 'column-reverse' },
-    ],
-    justifyContent: [
-      { label: 'Start', value: 'flex-start' },
-      { label: 'End', value: 'flex-end' },
-      { label: 'Center', value: 'center' },
-      { label: 'Space between', value: 'space-between' },
-      { label: 'Space around', value: 'space-around' },
-      { label: 'Space evenly', value: 'space-evenly' },
-    ],
-    alignItems: [
-      { label: 'Stretch', value: 'stretch' },
-      { label: 'Start', value: 'flex-start' },
-      { label: 'End', value: 'flex-end' },
-      { label: 'Center', value: 'center' },
-      { label: 'Baseline', value: 'baseline' },
-    ],
-    flexWrap: [
-      { label: 'No wrap', value: 'nowrap' },
-      { label: 'Wrap', value: 'wrap' },
-      { label: 'Wrap reverse', value: 'wrap-reverse' },
-    ],
-    borderStyle: [
-      { label: 'None', value: 'none' },
-      { label: 'Solid', value: 'solid' },
-      { label: 'Dashed', value: 'dashed' },
-      { label: 'Dotted', value: 'dotted' },
-      { label: 'Double', value: 'double' },
-    ],
-  };
-
-function isValidStyleValue(key: StyleFieldKey, value: string): boolean {
-  if (value === '') return true;
-  if (key === 'lineHeight') return /^(?:\d+(?:\.\d+)?|[\d.]+(?:px|rem|em|%))$/.test(value);
-  if (key === 'fontWeight') return /^(?:[1-9]00|normal|bold|lighter|bolder)$/.test(value);
-  if (key === 'boxShadow') return !/[;{}]|url\s*\(/i.test(value);
-  if (key === 'gridTemplateColumns' || key === 'gridTemplateRows') {
-    return !/[;{}]|url\s*\(/i.test(value);
-  }
-  return /^(?:0|auto|min-content|max-content|fit-content|(?:-?(?:\d+|\d*\.\d+)(?:px|rem|em|%|vw|vh|dvh|svh|ch|fr)))$/.test(
-    value,
-  );
-}
-
-function StyleTextField({
-  name,
-  label,
-  value,
-  onCommit,
-  placeholder,
-}: {
-  name: StyleFieldKey;
-  label: string;
-  value: string;
-  onCommit: (value: string) => void;
-  placeholder: string;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraft(value);
-    setError(null);
-  }, [value]);
-
-  const commit = () => {
-    if (draft.trim() === value) {
-      setError(null);
-      return;
-    }
-    if (!isValidStyleValue(name, draft.trim())) {
-      setError('Saisissez une valeur CSS prise en charge.');
-      return;
-    }
-    setError(null);
-    onCommit(draft.trim());
-  };
-
-  return (
-    <label className="property-field" htmlFor={`style-${name}`}>
-      <span>{label}</span>
-      <input
-        id={`style-${name}`}
-        type="text"
-        value={draft}
-        placeholder={placeholder}
-        aria-invalid={error !== null}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          setError(null);
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            commit();
-            event.currentTarget.blur();
-          }
-        }}
-      />
-      {error ? (
-        <small className="property-error" role="alert">
-          {error}
-        </small>
-      ) : null}
-    </label>
-  );
-}
-
-function ResponsiveStyleFields({
-  node,
-  viewport,
-  fields,
-  onChange,
-}: {
-  node: ComponentNode;
-  viewport: ViewportMode;
-  fields: readonly (readonly [StyleFieldKey, string])[];
-  onChange: (styles: Partial<ElementStyles>) => void;
-}) {
-  const styles = node.styles[viewport];
-  return (
-    <>
-      {fields.map(([key, label]) => {
-        const value = styles?.[key];
-        const update = (nextValue: string) => updateResponsiveStyle(key, nextValue, onChange);
-        const options = SELECT_OPTIONS[key];
-        const fieldOptions = options
-          ? options.some((option) => option.value === '')
-            ? options
-            : [{ label: 'Inherit', value: '' }, ...options]
-          : undefined;
-        return (
-          <React.Fragment key={key}>
-            {fieldOptions ? (
-              <label className="property-field">
-                <span>{label}</span>
-                <select
-                  value={String(value ?? '')}
-                  onChange={(event) => update(event.target.value)}
-                >
-                  {fieldOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : key === 'color' || key === 'backgroundColor' || key === 'borderColor' ? (
-              <label className="property-field">
-                <span>{label}</span>
-                <input
-                  type="color"
-                  aria-label={label}
-                  value={
-                    typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : '#ffffff'
-                  }
-                  onChange={(event) => update(event.target.value)}
-                />
-                {value !== undefined ? (
-                  <button type="button" className="property-reset" onClick={() => update('')}>
-                    Reset
-                  </button>
-                ) : null}
-              </label>
-            ) : (
-              <StyleTextField
-                name={key}
-                label={label}
-                value={typeof value === 'string' ? value : ''}
-                placeholder={viewport === 'desktop' ? 'e.g. 24px' : 'Inherits Desktop'}
-                onCommit={update}
-              />
-            )}
-          </React.Fragment>
-        );
-      })}
-      {viewport !== 'desktop' ? (
-        <p className="responsive-help">
-          Empty values inherit Desktop. Changes apply only to the {viewport} preview.
-        </p>
-      ) : null}
-    </>
-  );
-}
-
-function updateResponsiveStyle(
-  key: StyleFieldKey,
-  value: string,
-  onChange: (styles: Partial<ElementStyles>) => void,
-): void {
-  onChange({ [key]: value });
+function parsePx(val?: string): string {
+  if (!val) return '';
+  const num = val.replace(/px$/, '').trim();
+  return isNaN(Number(num)) ? '' : num;
 }
 
 export const PropertyPanel = React.memo(
   ({
     collapsed = false,
     onToggleCollapsed,
+    selectedNodeId: controlledSelectedNodeId,
   }: {
     collapsed?: boolean;
     onToggleCollapsed?: () => void;
+    selectedNodeId?: string | null;
   }) => {
     const document = useEditorStore((state) => state.document);
-    const selectedNodeId = useEditorStore((state) => state.selectedNodeId);
+    const storeSelectedNodeId = useEditorStore((state) => state.selectedNodeId);
+    const selectedNodeId =
+      controlledSelectedNodeId !== undefined ? controlledSelectedNodeId : storeSelectedNodeId;
     const updateNodeProps = useEditorStore((state) => state.updateNodeProps);
     const updateNodeStyles = useEditorStore((state) => state.updateNodeStyles);
     const viewport = useEditorStore((state) => state.viewport);
+    const [inspectorTab, setInspectorTab] = useState<'design' | 'prototype'>('design');
+
+    // Section collapse states
+    const [openSections, setOpenSections] = useState({
+      position: true,
+      layout: true,
+      typography: true,
+      appearance: true,
+      fill: true,
+      stroke: true,
+      effects: false,
+      props: true,
+    });
+
+    const toggleSection = (section: keyof typeof openSections) => {
+      setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
+    };
+
     const selectedNode = selectedNodeId
       ? document.sections
           .map((section) => findNode(section.children, selectedNodeId))
           .find((node) => node !== undefined)
       : undefined;
+
     const definition = selectedNode ? getDefaultComponent(selectedNode.type) : undefined;
     const selectedNodeLocked = selectedNode
       ? isNodeEffectivelyLocked(document, selectedNode.id)
@@ -487,151 +96,684 @@ export const PropertyPanel = React.memo(
       );
     }
 
+    if (!selectedNode) {
+      return (
+        <aside
+          className="editor-properties figma-properties"
+          aria-label="Panneau de propriétés"
+          id="editor-right-panel"
+        >
+          <div className="figma-inspector-tabs">
+            <button
+              type="button"
+              className={`figma-tab-btn ${inspectorTab === 'design' ? 'is-active' : ''}`}
+              onClick={() => setInspectorTab('design')}
+            >
+              Design
+            </button>
+            <button
+              type="button"
+              className={`figma-tab-btn ${inspectorTab === 'prototype' ? 'is-active' : ''}`}
+              onClick={() => setInspectorTab('prototype')}
+            >
+              Prototype
+            </button>
+          </div>
+          <div className="figma-empty-inspector">
+            <div className="figma-empty-icon">
+              <Layers size={28} />
+            </div>
+            <strong>Aucun élément sélectionné</strong>
+            <p>Sélectionnez un composant sur le canvas ou dans les calques pour inspecter et modifier ses propriétés.</p>
+          </div>
+        </aside>
+      );
+    }
+
+    const currentStyles: ElementStyles = selectedNode.styles[viewport] ?? {};
+
+    const handleStyleChange = (patch: Partial<ElementStyles>) => {
+      updateNodeStyles(selectedNode.id, viewport, patch);
+    };
+
+    // Contextual checks
+    const isTextComponent =
+      selectedNode.type === 'core/heading' ||
+      selectedNode.type === 'core/text' ||
+      selectedNode.type === 'core/button' ||
+      Boolean(selectedNode.props.text || selectedNode.props.content || selectedNode.props.label);
+
+    const isLayoutComponent =
+      selectedNode.type === 'core/container' ||
+      selectedNode.type === 'core/grid' ||
+      Boolean(definition?.canHaveChildren);
+
+    const hasSpecificProps = definition && Object.keys(definition.controls).length > 0;
+
     return (
       <aside
-        className="editor-properties"
+        className="editor-properties figma-properties"
         aria-label="Panneau de propriétés"
         id="editor-right-panel"
       >
-        <div className="panel-heading">
-          <div>
-            <span className="panel-eyebrow">INSPECTEUR</span>
-            <h2>Propriétés</h2>
+        {/* Top Header / Tabs */}
+        <div className="figma-inspector-header">
+          <div className="figma-inspector-tabs">
+            <button
+              type="button"
+              className={`figma-tab-btn ${inspectorTab === 'design' ? 'is-active' : ''}`}
+              onClick={() => setInspectorTab('design')}
+            >
+              Design
+            </button>
+            <button
+              type="button"
+              className={`figma-tab-btn ${inspectorTab === 'prototype' ? 'is-active' : ''}`}
+              onClick={() => setInspectorTab('prototype')}
+            >
+              Prototype
+            </button>
           </div>
           <button
             type="button"
-            className="panel-collapse-button"
-            aria-label="Réduire l’inspecteur"
-            title="Réduire l’inspecteur"
+            className="figma-icon-btn"
+            title="Réduire l'inspecteur"
+            aria-label="Réduire l'inspecteur"
             onClick={onToggleCollapsed}
           >
-            ›
+            <ChevronRight size={14} />
           </button>
         </div>
-        {!selectedNode ? (
-          <p className="panel-empty">
-            Sélectionnez un composant sur le canvas pour modifier ses propriétés.
-          </p>
-        ) : (
-          <>
-            <div className="selected-component">
-              <strong>{selectedNode.name ?? definition?.label ?? selectedNode.type}</strong>
-              {selectedNode.name ? <small>{definition?.label ?? selectedNode.type}</small> : null}
-              <code>{selectedNode.id}</code>
-            </div>
-            {selectedNodeLocked ? (
-              <p className="locked-node-message" role="status">
-                Cet élément ou son groupe parent est verrouillé.
-              </p>
-            ) : null}
-            <fieldset className="property-controls" disabled={selectedNodeLocked}>
-              {definition ? (
-                <>
-                  {(['content', 'layout', 'style'] as const).map((category) => {
-                    const controls = Object.entries(definition.controls).filter(
-                      ([, control]) => control.category === category,
-                    );
-                    if (controls.length === 0) return null;
-                    const title =
-                      category === 'content'
-                        ? 'Content'
-                        : category === 'layout'
-                          ? 'Layout'
-                          : 'Appearance';
-                    return (
-                      <details className="property-group" key={category} open>
-                        <summary>{title}</summary>
-                        {controls.map(([name, control]) => (
-                          <PropertyInput
-                            key={name}
-                            name={name}
-                            control={control}
-                            value={selectedNode.props[name] ?? control.defaultValue ?? ''}
-                            onChange={(value) =>
-                              updateNodeProps(selectedNode.id, { [name]: value })
-                            }
-                          />
-                        ))}
-                      </details>
-                    );
-                  })}
-                  <details className="property-group" open>
-                    <summary>Layout · {viewport}</summary>
-                    <ResponsiveStyleFields
-                      node={selectedNode}
-                      viewport={viewport}
-                      fields={LAYOUT_FIELDS}
-                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+
+        {/* Selected Component Header */}
+        <div className="figma-node-header">
+          <div className="figma-node-badge">
+            <Box size={14} />
+            <strong>{selectedNode.name || definition?.label || selectedNode.type}</strong>
+          </div>
+          <span className="figma-node-id">{selectedNode.id}</span>
+        </div>
+
+        {selectedNodeLocked && (
+          <div className="figma-locked-banner" role="status">
+            Élément verrouillé. Déverrouillez-le pour modifier ses propriétés.
+          </div>
+        )}
+
+        <fieldset className="figma-controls-fieldset" disabled={selectedNodeLocked}>
+          {/* SECTION 1: POSITION & DIMENSIONS */}
+          <div className="figma-section-group">
+            <button
+              type="button"
+              className="figma-accordion-header"
+              onClick={() => toggleSection('position')}
+            >
+              <div className="figma-accordion-title">
+                {openSections.position ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <span>Position</span>
+              </div>
+            </button>
+
+            {openSections.position && (
+              <div className="figma-accordion-body">
+                {/* 6 Alignment quick buttons */}
+                <div className="figma-align-toolbar">
+                  <button
+                    type="button"
+                    className="figma-align-btn"
+                    title="Aligner à gauche"
+                    onClick={() => handleStyleChange({ marginLeft: '0px', marginRight: 'auto' })}
+                  >
+                    <AlignLeft size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="figma-align-btn"
+                    title="Centrer horizontalement"
+                    onClick={() => handleStyleChange({ marginLeft: 'auto', marginRight: 'auto' })}
+                  >
+                    <AlignCenter size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="figma-align-btn"
+                    title="Aligner à droite"
+                    onClick={() => handleStyleChange({ marginLeft: 'auto', marginRight: '0px' })}
+                  >
+                    <AlignRight size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="figma-align-btn"
+                    title="Aligner en haut"
+                    onClick={() => handleStyleChange({ marginTop: '0px', marginBottom: 'auto' })}
+                  >
+                    <AlignVerticalJustifyStart size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="figma-align-btn"
+                    title="Centrer verticalement"
+                    onClick={() => handleStyleChange({ marginTop: 'auto', marginBottom: 'auto' })}
+                  >
+                    <AlignVerticalJustifyCenter size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="figma-align-btn"
+                    title="Aligner en bas"
+                    onClick={() => handleStyleChange({ marginTop: 'auto', marginBottom: '0px' })}
+                  >
+                    <AlignVerticalJustifyEnd size={13} />
+                  </button>
+                </div>
+
+                {/* Dimensions grid: W and H */}
+                <div className="figma-fields-grid-2">
+                  <div className="figma-field-compact">
+                    <span className="figma-field-label">W</span>
+                    <input
+                      type="text"
+                      className="figma-compact-input"
+                      placeholder="Auto"
+                      value={currentStyles.width ?? ''}
+                      onChange={(e) => handleStyleChange({ width: e.target.value.trim() || undefined })}
                     />
-                  </details>
-                  <details className="property-group" open>
-                    <summary>Spacing · {viewport}</summary>
-                    <ResponsiveStyleFields
-                      node={selectedNode}
-                      viewport={viewport}
-                      fields={SPACING_FIELDS}
-                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                  </div>
+                  <div className="figma-field-compact">
+                    <span className="figma-field-label">H</span>
+                    <input
+                      type="text"
+                      className="figma-compact-input"
+                      placeholder="Auto"
+                      value={currentStyles.height ?? ''}
+                      onChange={(e) => handleStyleChange({ height: e.target.value.trim() || undefined })}
                     />
-                  </details>
-                  <details className="property-group">
-                    <summary>Typography</summary>
-                    <ResponsiveStyleFields
-                      node={selectedNode}
-                      viewport={viewport}
-                      fields={TYPOGRAPHY_FIELDS}
-                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                  </div>
+                </div>
+
+                {/* Min / Max bounds */}
+                <div className="figma-fields-grid-2">
+                  <div className="figma-field-compact">
+                    <span className="figma-field-label">Min W</span>
+                    <input
+                      type="text"
+                      className="figma-compact-input"
+                      placeholder="None"
+                      value={currentStyles.minWidth ?? ''}
+                      onChange={(e) => handleStyleChange({ minWidth: e.target.value.trim() || undefined })}
                     />
-                  </details>
-                  <details className="property-group">
-                    <summary>Appearance · {viewport}</summary>
-                    <ResponsiveStyleFields
-                      node={selectedNode}
-                      viewport={viewport}
-                      fields={APPEARANCE_FIELDS}
-                      onChange={(styles) => updateNodeStyles(selectedNode.id, viewport, styles)}
+                  </div>
+                  <div className="figma-field-compact">
+                    <span className="figma-field-label">Max W</span>
+                    <input
+                      type="text"
+                      className="figma-compact-input"
+                      placeholder="None"
+                      value={currentStyles.maxWidth ?? ''}
+                      onChange={(e) => handleStyleChange({ maxWidth: e.target.value.trim() || undefined })}
                     />
-                    <label className="property-field">
-                      <span>Opacity</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 2: AUTO LAYOUT (Flex & Grid) */}
+          {isLayoutComponent && (
+            <div className="figma-section-group">
+              <button
+                type="button"
+                className="figma-accordion-header"
+                onClick={() => toggleSection('layout')}
+              >
+                <div className="figma-accordion-title">
+                  {openSections.layout ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>Auto Layout</span>
+                </div>
+              </button>
+
+              {openSections.layout && (
+                <div className="figma-accordion-body">
+                  {/* Direction buttons */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Direction</span>
+                    <div className="figma-button-toggle-group">
+                      <button
+                        type="button"
+                        className={`figma-toggle-btn ${currentStyles.flexDirection === 'row' ? 'is-active' : ''}`}
+                        title="Horizontal"
+                        onClick={() =>
+                          handleStyleChange({
+                            display: 'flex',
+                            flexDirection: 'row',
+                          })
+                        }
+                      >
+                        <ArrowRight size={13} />
+                        <span>Horiz</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`figma-toggle-btn ${currentStyles.flexDirection === 'column' ? 'is-active' : ''}`}
+                        title="Vertical"
+                        onClick={() =>
+                          handleStyleChange({
+                            display: 'flex',
+                            flexDirection: 'column',
+                          })
+                        }
+                      >
+                        <ArrowDown size={13} />
+                        <span>Vert</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Alignment & Justify */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Aligner</span>
+                    <select
+                      className="figma-select"
+                      value={currentStyles.alignItems ?? 'stretch'}
+                      onChange={(e) =>
+                        handleStyleChange({
+                          alignItems: e.target.value as ElementStyles['alignItems'],
+                        })
+                      }
+                    >
+                      <option value="stretch">Étirer (Stretch)</option>
+                      <option value="flex-start">Début (Start)</option>
+                      <option value="center">Centré (Center)</option>
+                      <option value="flex-end">Fin (End)</option>
+                    </select>
+                  </div>
+
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Distribuer</span>
+                    <select
+                      className="figma-select"
+                      value={currentStyles.justifyContent ?? 'flex-start'}
+                      onChange={(e) =>
+                        handleStyleChange({
+                          justifyContent: e.target.value as ElementStyles['justifyContent'],
+                        })
+                      }
+                    >
+                      <option value="flex-start">Au début</option>
+                      <option value="center">Au centre</option>
+                      <option value="flex-end">À la fin</option>
+                      <option value="space-between">Espacer (Between)</option>
+                      <option value="space-around">Autour (Around)</option>
+                    </select>
+                  </div>
+
+                  {/* Gap */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Gap</span>
+                    <div className="figma-unit-input-wrap">
                       <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={selectedNode.styles[viewport].opacity ?? 1}
-                        onChange={(event) =>
-                          updateNodeStyles(selectedNode.id, viewport, {
-                            opacity: Number(event.target.value),
+                        type="number"
+                        className="figma-compact-input"
+                        placeholder="0"
+                        value={parsePx(currentStyles.gap)}
+                        onChange={(e) =>
+                          handleStyleChange({
+                            gap: e.target.value ? `${e.target.value}px` : undefined,
                           })
                         }
                       />
-                      {selectedNode.styles[viewport].opacity !== undefined ? (
-                        <button
-                          type="button"
-                          className="property-reset"
-                          onClick={() =>
-                            updateNodeStyles(selectedNode.id, viewport, { opacity: undefined })
-                          }
-                        >
-                          Reset
-                        </button>
-                      ) : null}
-                    </label>
-                  </details>
-                  <details className="property-group">
-                    <summary>Advanced</summary>
-                    <p className="advanced-node-id">
-                      Node ID <code>{selectedNode.id}</code>
-                    </p>
-                  </details>
-                </>
-              ) : (
-                <p className="panel-empty">
-                  Aucun panneau de propriétés n’est défini pour ce composant.
-                </p>
+                      <span className="figma-unit">px</span>
+                    </div>
+                  </div>
+
+                  {/* Padding via SpacingBox */}
+                  <SpacingBox
+                    label="Padding"
+                    top={currentStyles.paddingTop}
+                    right={currentStyles.paddingRight}
+                    bottom={currentStyles.paddingBottom}
+                    left={currentStyles.paddingLeft}
+                    onChange={(vals) =>
+                      handleStyleChange({
+                        paddingTop: vals.top,
+                        paddingRight: vals.right,
+                        paddingBottom: vals.bottom,
+                        paddingLeft: vals.left,
+                      })
+                    }
+                  />
+
+                  {/* Margin via SpacingBox */}
+                  <SpacingBox
+                    label="Margin"
+                    top={currentStyles.marginTop}
+                    right={currentStyles.marginRight}
+                    bottom={currentStyles.marginBottom}
+                    left={currentStyles.marginLeft}
+                    onChange={(vals) =>
+                      handleStyleChange({
+                        marginTop: vals.top,
+                        marginRight: vals.right,
+                        marginBottom: vals.bottom,
+                        marginLeft: vals.left,
+                      })
+                    }
+                  />
+                </div>
               )}
-            </fieldset>
-          </>
-        )}
+            </div>
+          )}
+
+          {/* SECTION 3: TYPOGRAPHY (Contextuelle) */}
+          {isTextComponent && (
+            <div className="figma-section-group">
+              <button
+                type="button"
+                className="figma-accordion-header"
+                onClick={() => toggleSection('typography')}
+              >
+                <div className="figma-accordion-title">
+                  {openSections.typography ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>Typography</span>
+                </div>
+              </button>
+
+              {openSections.typography && (
+                <div className="figma-accordion-body">
+                  {/* Font Size & Weight */}
+                  <div className="figma-fields-grid-2">
+                    <div className="figma-field-compact">
+                      <span className="figma-field-label">Taille</span>
+                      <input
+                        type="text"
+                        className="figma-compact-input"
+                        placeholder="16px"
+                        value={currentStyles.fontSize ?? ''}
+                        onChange={(e) => handleStyleChange({ fontSize: e.target.value.trim() || undefined })}
+                      />
+                    </div>
+                    <div className="figma-field-compact">
+                      <span className="figma-field-label">Graisse</span>
+                      <select
+                        className="figma-compact-select"
+                        value={currentStyles.fontWeight ?? 'normal'}
+                        onChange={(e) => handleStyleChange({ fontWeight: e.target.value || undefined })}
+                      >
+                        <option value="400">Regular (400)</option>
+                        <option value="500">Medium (500)</option>
+                        <option value="600">Semibold (600)</option>
+                        <option value="700">Bold (700)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Text Align buttons */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Alignement</span>
+                    <div className="figma-button-toggle-group">
+                      {(['left', 'center', 'right', 'justify'] as const).map((align) => (
+                        <button
+                          key={align}
+                          type="button"
+                          className={`figma-toggle-btn ${currentStyles.textAlign === align ? 'is-active' : ''}`}
+                          title={`Aligner ${align}`}
+                          onClick={() => handleStyleChange({ textAlign: align })}
+                        >
+                          {align === 'left' ? (
+                            <AlignLeft size={13} />
+                          ) : align === 'center' ? (
+                            <AlignCenter size={13} />
+                          ) : (
+                            <AlignRight size={13} />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Text Color */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Couleur texte</span>
+                    <div className="figma-color-input-row">
+                      <input
+                        type="color"
+                        className="figma-mini-color"
+                        value={
+                          typeof currentStyles.color === 'string' &&
+                          /^#[0-9a-f]{6}$/i.test(currentStyles.color)
+                            ? currentStyles.color
+                            : '#172033'
+                        }
+                        onChange={(e) => handleStyleChange({ color: e.target.value })}
+                      />
+                      <input
+                        type="text"
+                        className="figma-compact-input"
+                        placeholder="#172033"
+                        value={currentStyles.color ?? ''}
+                        onChange={(e) => handleStyleChange({ color: e.target.value.trim() || undefined })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SECTION 4: APPEARANCE (Opacity & Corner Radius) */}
+          <div className="figma-section-group">
+            <button
+              type="button"
+              className="figma-accordion-header"
+              onClick={() => toggleSection('appearance')}
+            >
+              <div className="figma-accordion-title">
+                {openSections.appearance ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <span>Appearance</span>
+              </div>
+            </button>
+
+            {openSections.appearance && (
+              <div className="figma-accordion-body">
+                {/* Opacity */}
+                <div className="figma-control-row">
+                  <span className="figma-control-label">Opacité</span>
+                  <div className="figma-slider-input-group">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      className="figma-range-slider"
+                      value={currentStyles.opacity ?? 1}
+                      onChange={(e) => handleStyleChange({ opacity: Number(e.target.value) })}
+                    />
+                    <span className="figma-slider-val">
+                      {Math.round((currentStyles.opacity ?? 1) * 100)}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Corner Radius */}
+                <div className="figma-control-row">
+                  <span className="figma-control-label">Rayon (Radius)</span>
+                  <div className="figma-unit-input-wrap">
+                    <input
+                      type="number"
+                      className="figma-compact-input"
+                      placeholder="0"
+                      value={parsePx(currentStyles.borderRadius)}
+                      onChange={(e) =>
+                        handleStyleChange({
+                          borderRadius: e.target.value ? `${e.target.value}px` : undefined,
+                        })
+                      }
+                    />
+                    <span className="figma-unit">px</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 5: FILL (Système de remplissage Figma) */}
+          <div className="figma-section-group">
+            <button
+              type="button"
+              className="figma-accordion-header"
+              onClick={() => toggleSection('fill')}
+            >
+              <div className="figma-accordion-title">
+                {openSections.fill ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <span>Fill</span>
+              </div>
+            </button>
+
+            {openSections.fill && (
+              <div className="figma-accordion-body">
+                <FillEditor styles={currentStyles} onChange={handleStyleChange} />
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 6: STROKE (Contour / Bordure) */}
+          <div className="figma-section-group">
+            <button
+              type="button"
+              className="figma-accordion-header"
+              onClick={() => toggleSection('stroke')}
+            >
+              <div className="figma-accordion-title">
+                {openSections.stroke ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <span>Stroke</span>
+              </div>
+            </button>
+
+            {openSections.stroke && (
+              <div className="figma-accordion-body">
+                <div className="figma-control-row">
+                  <span className="figma-control-label">Couleur</span>
+                  <div className="figma-color-input-row">
+                    <input
+                      type="color"
+                      className="figma-mini-color"
+                      value={
+                        typeof currentStyles.borderColor === 'string' &&
+                        /^#[0-9a-f]{6}$/i.test(currentStyles.borderColor)
+                          ? currentStyles.borderColor
+                          : '#e2e8f0'
+                      }
+                      onChange={(e) => handleStyleChange({ borderColor: e.target.value })}
+                    />
+                    <input
+                      type="text"
+                      className="figma-compact-input"
+                      placeholder="#E2E8F0"
+                      value={currentStyles.borderColor ?? ''}
+                      onChange={(e) => handleStyleChange({ borderColor: e.target.value.trim() || undefined })}
+                    />
+                  </div>
+                </div>
+
+                <div className="figma-fields-grid-2">
+                  <div className="figma-field-compact">
+                    <span className="figma-field-label">Largeur</span>
+                    <input
+                      type="text"
+                      className="figma-compact-input"
+                      placeholder="0px"
+                      value={currentStyles.borderWidth ?? ''}
+                      onChange={(e) => handleStyleChange({ borderWidth: e.target.value.trim() || undefined })}
+                    />
+                  </div>
+                  <div className="figma-field-compact">
+                    <span className="figma-field-label">Style</span>
+                    <select
+                      className="figma-compact-select"
+                      value={currentStyles.borderStyle ?? 'solid'}
+                      onChange={(e) =>
+                        handleStyleChange({
+                          borderStyle: e.target.value as ElementStyles['borderStyle'],
+                        })
+                      }
+                    >
+                      <option value="none">Aucun</option>
+                      <option value="solid">Solide</option>
+                      <option value="dashed">Tirets</option>
+                      <option value="dotted">Points</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 7: COMPONENT SPECIFIC PROPS */}
+          {hasSpecificProps && (
+            <div className="figma-section-group">
+              <button
+                type="button"
+                className="figma-accordion-header"
+                onClick={() => toggleSection('props')}
+              >
+                <div className="figma-accordion-title">
+                  {openSections.props ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>Propriétés du composant</span>
+                </div>
+              </button>
+
+              {openSections.props && (
+                <div className="figma-accordion-body">
+                  {Object.entries(definition.controls).map(([name, control]) => (
+                    <div className="figma-prop-item" key={name}>
+                      <span className="figma-prop-label">{control.label}</span>
+                      {control.type === 'textarea' ? (
+                        <textarea
+                          className="figma-textarea"
+                          rows={3}
+                          value={String(selectedNode.props[name] ?? control.defaultValue ?? '')}
+                          onChange={(e) => updateNodeProps(selectedNode.id, { [name]: e.target.value })}
+                        />
+                      ) : control.type === 'select' ? (
+                        <select
+                          className="figma-select"
+                          value={String(selectedNode.props[name] ?? control.defaultValue ?? '')}
+                          onChange={(e) => updateNodeProps(selectedNode.id, { [name]: e.target.value })}
+                        >
+                          {(control.options ?? []).map((opt) => (
+                            <option key={String(opt.value)} value={String(opt.value)}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : control.type === 'boolean' ? (
+                        <input
+                          type="checkbox"
+                          className="figma-checkbox"
+                          checked={selectedNode.props[name] === true}
+                          onChange={(e) => updateNodeProps(selectedNode.id, { [name]: e.target.checked })}
+                        />
+                      ) : (
+                        <input
+                          type={control.type === 'number' ? 'number' : 'text'}
+                          className="figma-compact-input"
+                          value={String(selectedNode.props[name] ?? control.defaultValue ?? '')}
+                          placeholder={control.placeholder}
+                          onChange={(e) =>
+                            updateNodeProps(selectedNode.id, {
+                              [name]: control.type === 'number' ? Number(e.target.value) : e.target.value,
+                            })
+                          }
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </fieldset>
       </aside>
     );
   },

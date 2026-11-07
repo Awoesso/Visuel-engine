@@ -124,6 +124,8 @@ export const initialDocument: PageDocument = PageDocumentSchema.parse({
 });
 
 interface EditorState {
+  pages: PageDocument[];
+  activePageId: string;
   document: PageDocument;
   selectedNodeId: NodeId | null;
   viewport: ViewportMode;
@@ -133,6 +135,11 @@ interface EditorState {
   futureDocuments: PageDocument[];
 }
 interface EditorActions {
+  createPage: (title?: string) => string;
+  switchPage: (pageId: string) => boolean;
+  duplicatePage: (pageId: string) => boolean;
+  deletePage: (pageId: string) => boolean;
+  renamePage: (pageId: string, title: string) => boolean;
   addComponent: (componentId: string) => void;
   addComponentAt: (
     componentId: string,
@@ -301,7 +308,7 @@ function createComponentNode(
   };
 }
 
-function assertValidDocument(document: PageDocument): void {
+export function assertValidDocument(document: PageDocument): void {
   const result = validatePageDocument(document);
   if (!result.success) {
     throw new Error(
@@ -311,6 +318,8 @@ function assertValidDocument(document: PageDocument): void {
 }
 
 export const useEditorStore = create<EditorState & EditorActions>()((set, get) => ({
+  pages: [initialDocument],
+  activePageId: initialDocument.id,
   document: initialDocument,
   selectedNodeId: null,
   viewport: 'desktop',
@@ -318,6 +327,113 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
   saveState: { status: 'idle', lastSavedAt: null, error: null },
   pastDocuments: [],
   futureDocuments: [],
+  createPage: (title) => {
+    const pageCount = get().pages.length + 1;
+    const pageTitle = title?.trim() || `Page ${pageCount}`;
+    const pageId = `page-${Date.now()}`;
+    const newPage: PageDocument = PageDocumentSchema.parse({
+      id: pageId,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      metadata: {
+        title: pageTitle,
+        description: `Page ${pageTitle}`,
+        slug: `/${pageTitle.toLowerCase().replace(/\s+/g, '-')}`,
+      },
+      theme: {},
+      sections: [
+        {
+          id: `section-${Date.now()}`,
+          name: 'Section principale',
+          children: [],
+          locked: false,
+          hidden: false,
+        },
+      ],
+    });
+    set((state) => ({
+      pages: [...state.pages, newPage],
+      activePageId: newPage.id,
+      document: newPage,
+      selectedNodeId: null,
+      pastDocuments: [],
+      futureDocuments: [],
+    }));
+    return pageId;
+  },
+  switchPage: (pageId) => {
+    const targetPage = get().pages.find((p) => p.id === pageId);
+    if (!targetPage) return false;
+    set({
+      activePageId: targetPage.id,
+      document: targetPage,
+      selectedNodeId: null,
+      pastDocuments: [],
+      futureDocuments: [],
+    });
+    return true;
+  },
+  duplicatePage: (pageId) => {
+    const targetPage = get().pages.find((p) => p.id === pageId);
+    if (!targetPage) return false;
+    const newPageId = `page-${Date.now()}`;
+    const newTitle = `${targetPage.metadata.title} (Copie)`;
+    const duplicated: PageDocument = PageDocumentSchema.parse({
+      ...targetPage,
+      id: newPageId,
+      metadata: {
+        ...targetPage.metadata,
+        title: newTitle,
+        slug: `/${newTitle.toLowerCase().replace(/\s+/g, '-')}`,
+      },
+    });
+    set((state) => ({
+      pages: [...state.pages, duplicated],
+      activePageId: duplicated.id,
+      document: duplicated,
+      selectedNodeId: null,
+      pastDocuments: [],
+      futureDocuments: [],
+    }));
+    return true;
+  },
+  deletePage: (pageId) => {
+    const currentPages = get().pages;
+    if (currentPages.length <= 1) return false; // Ne pas supprimer la dernière page
+    const nextPages = currentPages.filter((p) => p.id !== pageId);
+    const activeId = get().activePageId;
+    let nextActivePage = get().document;
+    if (activeId === pageId) {
+      nextActivePage = nextPages[0]!;
+    }
+    set({
+      pages: nextPages,
+      activePageId: nextActivePage.id,
+      document: nextActivePage,
+      selectedNodeId: null,
+      pastDocuments: [],
+      futureDocuments: [],
+    });
+    return true;
+  },
+  renamePage: (pageId, title) => {
+    const trimmed = title.trim();
+    if (!trimmed) return false;
+    set((state) => {
+      const nextPages = state.pages.map((p) =>
+        p.id === pageId
+          ? { ...p, metadata: { ...p.metadata, title: trimmed } }
+          : p,
+      );
+      const isCurrent = state.activePageId === pageId;
+      return {
+        pages: nextPages,
+        document: isCurrent
+          ? { ...state.document, metadata: { ...state.document.metadata, title: trimmed } }
+          : state.document,
+      };
+    });
+    return true;
+  },
   addComponent: (componentId) => {
     const currentDocument = get().document;
     const newNode = createComponentNode(componentId, currentDocument);
@@ -444,7 +560,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       else delete node.name;
     });
     if (candidate === current) return false;
-    commitDocument(set, candidate, get().selectedNodeId, `name:${nodeId}`);
+    commitDocument(set, candidate, get().selectedNodeId, `name:${nodeId}`, { skipFullValidation: true });
     return true;
   },
   setNodeLocked: (nodeId, locked) => {
@@ -461,7 +577,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       if (node) node.locked = locked;
     });
     if (candidate === current) return true;
-    commitDocument(set, candidate, get().selectedNodeId);
+    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
     return true;
   },
   setNodeHidden: (nodeId, hidden) => {
@@ -478,7 +594,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       if (node) node.hidden = hidden;
     });
     if (candidate === current) return true;
-    commitDocument(set, candidate, get().selectedNodeId);
+    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
     return true;
   },
   updateSectionName: (sectionId, name) => {
@@ -491,7 +607,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       const draftSection = draft.sections.find((item) => item.id === sectionId);
       if (draftSection) draftSection.name = normalizedName;
     });
-    commitDocument(set, candidate, get().selectedNodeId, `section-name:${sectionId}`);
+    commitDocument(set, candidate, get().selectedNodeId, `section-name:${sectionId}`, { skipFullValidation: true });
     return true;
   },
   setSectionLocked: (sectionId, locked) => {
@@ -503,7 +619,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       const draftSection = draft.sections.find((item) => item.id === sectionId);
       if (draftSection) draftSection.locked = locked;
     });
-    commitDocument(set, candidate, get().selectedNodeId);
+    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
     return true;
   },
   setSectionHidden: (sectionId, hidden) => {
@@ -515,7 +631,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       const draftSection = draft.sections.find((item) => item.id === sectionId);
       if (draftSection) draftSection.hidden = hidden;
     });
-    commitDocument(set, candidate, get().selectedNodeId);
+    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
     return true;
   },
   updateNodeProps: (nodeId, props) => {
@@ -538,7 +654,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         .find((match) => match !== undefined);
       if (draftNode) draftNode.props = parsed.data;
     });
-    commitDocument(set, candidate, nodeId, `props:${nodeId}`);
+    commitDocument(set, candidate, nodeId, `props:${nodeId}`, { skipFullValidation: true });
   },
   updateNodeStyles: (nodeId, mode, styles) => {
     const current = get().document;
@@ -560,7 +676,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       node.styles = parsed.data;
     });
     if (candidate === current) return;
-    commitDocument(set, candidate, nodeId, `styles:${nodeId}`);
+    commitDocument(set, candidate, nodeId, `styles:${nodeId}`, { skipFullValidation: true });
   },
   deleteNode: (nodeId) => {
     const current = get().document;
@@ -694,14 +810,28 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       ...currentDocument,
       metadata: { ...currentDocument.metadata, title: normalizedTitle },
     });
-    commitDocument(set, candidate, get().selectedNodeId, 'metadata:title');
+    commitDocument(set, candidate, get().selectedNodeId, 'metadata:title', { skipFullValidation: true });
   },
   setViewport: (mode) => set({ viewport: mode }),
   setZoom: (zoom) => set({ zoom: Math.min(1.5, Math.max(0.25, Math.round(zoom * 100) / 100)) }),
   replaceDocument: (document) => {
     assertValidDocument(document);
     lastHistoryGroup = null;
-    set({ document, selectedNodeId: null, pastDocuments: [], futureDocuments: [] });
+    set((state) => {
+      const pageIndex = state.pages.findIndex((p) => p.id === document.id);
+      const nextPages =
+        pageIndex >= 0
+          ? state.pages.map((p, idx) => (idx === pageIndex ? document : p))
+          : [document];
+      return {
+        pages: nextPages,
+        activePageId: document.id,
+        document,
+        selectedNodeId: null,
+        pastDocuments: [],
+        futureDocuments: [],
+      };
+    });
   },
   resetDemo: () => {
     const candidate = PageDocumentSchema.parse(initialDocument);
@@ -711,7 +841,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
   setSaveState: (saveState) => set({ saveState }),
 }));
 
-function commitDocument(
+export interface CommitOptions {
+  skipFullValidation?: boolean;
+}
+
+export function commitDocument(
   set: (
     partial:
       | Partial<EditorState & EditorActions>
@@ -720,8 +854,11 @@ function commitDocument(
   document: PageDocument,
   selectedNodeId: NodeId | null,
   groupKey?: string,
+  options?: CommitOptions,
 ): void {
-  assertValidDocument(document);
+  if (!options?.skipFullValidation) {
+    assertValidDocument(document);
+  }
   const timestamp = Date.now();
   set((state) => {
     const grouped =
@@ -729,7 +866,16 @@ function commitDocument(
       lastHistoryGroup?.key === groupKey &&
       timestamp - lastHistoryGroup.timestamp <= HISTORY_GROUP_WINDOW_MS;
     lastHistoryGroup = groupKey ? { key: groupKey, timestamp } : null;
+    const pageIndex = state.pages.findIndex(
+      (p) => p.id === state.activePageId || p.id === document.id,
+    );
+    const updatedPages =
+      pageIndex >= 0
+        ? state.pages.map((p, idx) => (idx === pageIndex ? document : p))
+        : [...state.pages, document];
     return {
+      pages: updatedPages,
+      activePageId: document.id,
       document,
       selectedNodeId,
       pastDocuments: grouped

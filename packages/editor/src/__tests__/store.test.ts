@@ -274,4 +274,48 @@ describe('editor document actions', () => {
         .fontSize,
     ).toBeUndefined();
   });
+
+  it('manages multiple pages: create, rename, duplicate, switch, and delete', () => {
+    const store = useEditorStore.getState();
+    const initialPageId = store.activePageId;
+    expect(store.pages).toHaveLength(1);
+
+    // 1. Create page
+    const page2Id = store.createPage('Contact Page');
+    let state = useEditorStore.getState();
+    expect(state.pages).toHaveLength(2);
+    expect(state.activePageId).toBe(page2Id);
+    expect(state.document.metadata.title).toBe('Contact Page');
+
+    // 2. Rename page
+    expect(state.renamePage(page2Id, 'Contact Us')).toBe(true);
+    state = useEditorStore.getState();
+    expect(state.document.metadata.title).toBe('Contact Us');
+    expect(state.pages.find((p) => p.id === page2Id)?.metadata.title).toBe('Contact Us');
+
+    // 3. Switch back to initial page
+    expect(state.switchPage(initialPageId)).toBe(true);
+    state = useEditorStore.getState();
+    expect(state.activePageId).toBe(initialPageId);
+    expect(state.document.id).toBe(initialPageId);
+
+    // 4. Duplicate page
+    expect(state.duplicatePage(initialPageId)).toBe(true);
+    state = useEditorStore.getState();
+    expect(state.pages).toHaveLength(3);
+    expect(state.document.metadata.title).toContain('(Copie)');
+
+    // 5. Delete duplicated page
+    const duplicatedId = state.activePageId;
+    expect(state.deletePage(duplicatedId)).toBe(true);
+    state = useEditorStore.getState();
+    expect(state.pages).toHaveLength(2);
+    expect(state.pages.some((p) => p.id === duplicatedId)).toBe(false);
+
+    // 6. Cannot delete down to 0 pages
+    expect(state.deletePage(state.pages[0]!.id)).toBe(true);
+    state = useEditorStore.getState();
+    expect(state.pages).toHaveLength(1);
+    expect(state.deletePage(state.pages[0]!.id)).toBe(false);
+  });
 });

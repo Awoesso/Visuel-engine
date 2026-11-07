@@ -1,9 +1,11 @@
-import type { ComponentNode, SectionNode } from '../schemas/node';
+import type { SectionNode } from '../schemas/node';
+
+export const ALLOWED_PROTOCOLS = ['http:', 'https:', 'data:'] as const;
 
 export const SECURITY_LIMITS = {
   MAX_DOCUMENT_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB
-  MAX_NODE_DEPTH: 32,
-  MAX_TOTAL_NODES: 2000,
+  MAX_NODE_DEPTH: 20,
+  MAX_TOTAL_NODES: 500,
   MAX_SECTIONS: 100,
 } as const;
 
@@ -65,6 +67,7 @@ export function isSafeUrl(url: string | undefined | null): boolean {
 /**
  * Sanitizes URLs in a props dictionary to prevent XSS.
  * Replaces dangerous URLs with safe fallback '#'.
+ * Recursively inspects nested objects and arrays.
  */
 export function sanitizePropsUrls(
   props: Record<string, unknown>,
@@ -72,19 +75,32 @@ export function sanitizePropsUrls(
   const sanitized: Record<string, unknown> = { ...props };
 
   for (const [key, value] of Object.entries(sanitized)) {
+    const lowerKey = key.toLowerCase();
+    const isUrlKey =
+      lowerKey.includes('url') ||
+      lowerKey.includes('href') ||
+      lowerKey.includes('link') ||
+      lowerKey.includes('src');
+
     if (typeof value === 'string') {
-      const lowerKey = key.toLowerCase();
-      if (
-        lowerKey.includes('url') ||
-        lowerKey.includes('href') ||
-        lowerKey.includes('link') ||
-        lowerKey.includes('src')
-      ) {
+      if (isUrlKey) {
         if (!isSafeUrl(value)) {
           sanitized[key] = '#';
         }
       }
-    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+    } else if (Array.isArray(value)) {
+      sanitized[key] = value.map((item) => {
+        if (typeof item === 'string') {
+          if (isUrlKey || item.trim().toLowerCase().startsWith('javascript:')) {
+            return isSafeUrl(item) ? item : '#';
+          }
+          return item;
+        } else if (item && typeof item === 'object') {
+          return sanitizePropsUrls(item as Record<string, unknown>);
+        }
+        return item;
+      });
+    } else if (value && typeof value === 'object') {
       sanitized[key] = sanitizePropsUrls(value as Record<string, unknown>);
     }
   }
@@ -94,30 +110,39 @@ export function sanitizePropsUrls(
 
 /**
  * Calculates total node count and maximum depth of a section hierarchy.
+ * Supports both typed SectionNode[] and untrusted raw JSON objects.
  */
-export function inspectTreeMetrics(sections: SectionNode[]): {
+export function inspectTreeMetrics(sections: SectionNode[] | unknown): {
   totalNodes: number;
   maxDepth: number;
 } {
   let totalNodes = 0;
   let maxDepth = 0;
 
-  function traverse(node: ComponentNode, depth: number) {
+  if (!Array.isArray(sections)) {
+    return { totalNodes, maxDepth };
+  }
+
+  function traverse(node: unknown, depth: number) {
+    if (!node || typeof node !== 'object') return;
     totalNodes += 1;
     if (depth > maxDepth) {
       maxDepth = depth;
     }
-    if (node.children && node.children.length > 0) {
-      for (const child of node.children) {
+    const children = (node as { children?: unknown }).children;
+    if (Array.isArray(children) && children.length > 0) {
+      for (const child of children) {
         traverse(child, depth + 1);
       }
     }
   }
 
   for (const section of sections) {
+    if (!section || typeof section !== 'object') continue;
     totalNodes += 1; // Count the section itself
-    if (section.children && section.children.length > 0) {
-      for (const child of section.children) {
+    const children = (section as { children?: unknown }).children;
+    if (Array.isArray(children) && children.length > 0) {
+      for (const child of children) {
         traverse(child, 1);
       }
     }

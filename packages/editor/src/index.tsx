@@ -4,6 +4,22 @@ import { ComponentSidebar } from './components/ComponentSidebar';
 import { PropertyPanel } from './components/PropertyPanel';
 import { useEditorStore } from './store';
 import { DocumentAutosave, restoreDocument, scheduleDocumentChange } from './persistence';
+import {
+  Undo2,
+  Redo2,
+  Pencil,
+  Eye,
+  Save,
+  Share2,
+  Play,
+  MoreHorizontal,
+  Layers,
+  Boxes,
+  Image as ImageIcon,
+  HelpCircle,
+  PanelLeftClose,
+  PanelLeft,
+} from 'lucide-react';
 import './components/styles.css';
 
 const PanelResizeHandle = React.memo(
@@ -276,7 +292,7 @@ export const EditorApp: React.FC = () => {
               onClick={beginRenameDocument}
             >
               <strong>{document.metadata.title}</strong>
-              <span aria-hidden="true">✎</span>
+              <Pencil size={12} className="document-rename-icon" />
             </button>
           )}
         </div>
@@ -310,7 +326,7 @@ export const EditorApp: React.FC = () => {
               disabled={!canUndo}
               onClick={undo}
             >
-              ↶
+              <Undo2 size={14} />
             </button>
             <button
               className="toolbar-button"
@@ -320,7 +336,7 @@ export const EditorApp: React.FC = () => {
               disabled={!canRedo}
               onClick={redo}
             >
-              ↷
+              <Redo2 size={14} />
             </button>
           </div>
           <div
@@ -343,7 +359,8 @@ export const EditorApp: React.FC = () => {
               autosaveRef.current?.saveNow(useEditorStore.getState().document);
             }}
           >
-            Enregistrer
+            <Save size={13} />
+            <span>Enregistrer</span>
           </button>
           <button
             className={`toolbar-button${previewMode ? ' toolbar-button-primary' : ''}`}
@@ -352,11 +369,24 @@ export const EditorApp: React.FC = () => {
             title="Aperçu du document"
             onClick={() => setPreviewMode((current) => !current)}
           >
-            {previewMode ? 'Quitter l’aperçu' : 'Aperçu'}
+            {previewMode ? <Play size={13} /> : <Eye size={13} />}
+            <span>{previewMode ? 'Quitter' : 'Aperçu'}</span>
+          </button>
+          <button
+            className="figma-share-pill-btn"
+            type="button"
+            title="Partager le document"
+            onClick={() => {
+              navigator.clipboard?.writeText(window.location.href);
+              alert('Lien du document copié dans le presse-papier !');
+            }}
+          >
+            <Share2 size={13} />
+            <span>Share</span>
           </button>
           <details className="toolbar-menu">
             <summary aria-label="Autres actions" title="Autres actions">
-              •••
+              <MoreHorizontal size={14} />
             </summary>
             <div className="toolbar-menu-popover">
               <button
@@ -375,10 +405,69 @@ export const EditorApp: React.FC = () => {
           </details>
         </div>
       </header>
-      <div
-        className={`editor-workspace${compactLayout ? ' is-compact' : ''}`}
-        style={{ gridTemplateColumns: workspaceColumns }}
-      >
+      <div className="figma-app-body">
+        {/* Leftmost Vertical Navigation Rail (Figma Style) */}
+        {!previewMode && (
+          <nav className="figma-left-rail" aria-label="Navigation principale">
+            <div className="figma-rail-top">
+              <button
+                type="button"
+                className={`figma-rail-btn ${!sidebarCollapsed ? 'is-active' : ''}`}
+                title="Calques & Pages (Alt+1)"
+                aria-label="Calques & Pages"
+                onClick={toggleSidebarCollapsed}
+              >
+                <Layers size={17} />
+              </button>
+              <button
+                type="button"
+                className="figma-rail-btn"
+                title="Bibliothèque de composants (Alt+2)"
+                aria-label="Composants"
+                onClick={() => {
+                  if (sidebarCollapsed) toggleSidebarCollapsed();
+                }}
+              >
+                <Boxes size={17} />
+              </button>
+              <button
+                type="button"
+                className="figma-rail-btn"
+                title="Ressources & Images (Alt+3)"
+                aria-label="Ressources"
+                onClick={() => {
+                  if (sidebarCollapsed) toggleSidebarCollapsed();
+                }}
+              >
+                <ImageIcon size={17} />
+              </button>
+            </div>
+            <div className="figma-rail-bottom">
+              <button
+                type="button"
+                className="figma-rail-btn"
+                title={sidebarCollapsed ? 'Afficher la sidebar' : 'Masquer la sidebar'}
+                aria-label="Basculer la sidebar"
+                onClick={toggleSidebarCollapsed}
+              >
+                {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+              </button>
+              <button
+                type="button"
+                className="figma-rail-btn"
+                title="Aide & Raccourcis"
+                aria-label="Aide"
+                onClick={() => alert('DSK Visual Engine - Raccourcis :\n• Ctrl+Z : Annuler\n• Ctrl+Shift+Z : Rétablir\n• Double-clic sur calque : Renommer')}
+              >
+                <HelpCircle size={16} />
+              </button>
+            </div>
+          </nav>
+        )}
+        <div
+          className={`editor-workspace${compactLayout ? ' is-compact' : ''}`}
+          style={{ gridTemplateColumns: workspaceColumns }}
+        >
         {!previewMode ? (
           <ComponentSidebar
             collapsed={sidebarCollapsed}
@@ -413,6 +502,7 @@ export const EditorApp: React.FC = () => {
             onToggleCollapsed={toggleInspectorCollapsed}
           />
         ) : null}
+        </div>
       </div>
     </div>
   );

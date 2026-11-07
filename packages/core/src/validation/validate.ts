@@ -25,6 +25,9 @@ export type ValidationResult = ValidationSuccessResult | ValidationFailureResult
 /**
  * Validates an untrusted input against the PageDocument specification,
  * enforcing schema conformance, resource limits, and unique node IDs.
+ *
+ * Resource limit pre-checks (depth <= 20, nodes <= 500) run BEFORE
+ * recursive Zod schema validation to guard against DoS/deep-recursion attacks.
  */
 export function validatePageDocument(input: unknown): ValidationResult {
   if (!input || typeof input !== 'object') {
@@ -34,7 +37,7 @@ export function validatePageDocument(input: unknown): ValidationResult {
     };
   }
 
-  // Check approximate payload size
+  // 1. Check approximate payload size and circular references
   try {
     const rawString = JSON.stringify(input);
     const byteLength = new TextEncoder().encode(rawString).length;
@@ -56,7 +59,48 @@ export function validatePageDocument(input: unknown): ValidationResult {
     };
   }
 
-  // Schema parsing
+  // 2. Resource limit pre-checks (BEFORE expensive recursive Zod parsing)
+  const rawSections = (input as { sections?: unknown }).sections;
+  if (Array.isArray(rawSections)) {
+    if (rawSections.length > SECURITY_LIMITS.MAX_SECTIONS) {
+      return {
+        success: false,
+        errors: [
+          {
+            path: 'sections',
+            message: `Sections count (${rawSections.length}) exceeds maximum limit of ${SECURITY_LIMITS.MAX_SECTIONS}`,
+          },
+        ],
+      };
+    }
+
+    const metrics = inspectTreeMetrics(rawSections);
+    if (metrics.maxDepth > SECURITY_LIMITS.MAX_NODE_DEPTH) {
+      return {
+        success: false,
+        errors: [
+          {
+            path: 'sections',
+            message: `Tree depth (${metrics.maxDepth}) exceeds maximum limit of ${SECURITY_LIMITS.MAX_NODE_DEPTH}`,
+          },
+        ],
+      };
+    }
+
+    if (metrics.totalNodes > SECURITY_LIMITS.MAX_TOTAL_NODES) {
+      return {
+        success: false,
+        errors: [
+          {
+            path: 'sections',
+            message: `Total node count (${metrics.totalNodes}) exceeds maximum limit of ${SECURITY_LIMITS.MAX_TOTAL_NODES}`,
+          },
+        ],
+      };
+    }
+  }
+
+  // 3. Schema parsing (Zod)
   const parseResult = PageDocumentSchema.safeParse(input);
   if (!parseResult.success) {
     const errors: ValidationErrorItem[] = parseResult.error.errors.map((err) => ({
@@ -68,46 +112,7 @@ export function validatePageDocument(input: unknown): ValidationResult {
 
   const document = parseResult.data;
 
-  // Check sections count
-  if (document.sections.length > SECURITY_LIMITS.MAX_SECTIONS) {
-    return {
-      success: false,
-      errors: [
-        {
-          path: 'sections',
-          message: `Sections count (${document.sections.length}) exceeds maximum limit of ${SECURITY_LIMITS.MAX_SECTIONS}`,
-        },
-      ],
-    };
-  }
-
-  // Check tree metrics (depth and total nodes)
-  const metrics = inspectTreeMetrics(document.sections);
-  if (metrics.maxDepth > SECURITY_LIMITS.MAX_NODE_DEPTH) {
-    return {
-      success: false,
-      errors: [
-        {
-          path: 'sections',
-          message: `Tree depth (${metrics.maxDepth}) exceeds maximum limit of ${SECURITY_LIMITS.MAX_NODE_DEPTH}`,
-        },
-      ],
-    };
-  }
-
-  if (metrics.totalNodes > SECURITY_LIMITS.MAX_TOTAL_NODES) {
-    return {
-      success: false,
-      errors: [
-        {
-          path: 'sections',
-          message: `Total node count (${metrics.totalNodes}) exceeds maximum limit of ${SECURITY_LIMITS.MAX_TOTAL_NODES}`,
-        },
-      ],
-    };
-  }
-
-  // Check unique IDs across sections and component nodes
+  // 4. Check unique IDs across sections and component nodes
   const idMap = new Set<string>();
   const duplicateErrors: ValidationErrorItem[] = [];
 
