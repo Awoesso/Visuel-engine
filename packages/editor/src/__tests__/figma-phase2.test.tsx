@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import React from 'react';
 import { FillEditor } from '../components/ui/FillEditor';
 import { SpacingBox } from '../components/ui/SpacingBox';
 import { PropertyPanel } from '../components/PropertyPanel';
