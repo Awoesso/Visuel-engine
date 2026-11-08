@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useRef } from 'react';
-import type { ComponentNode } from '@dsk/core';
-import { AVAILABLE_COMPONENTS, getDefaultComponent } from '../constants';
-import { useEditorStore } from '../store';
+import type { ComponentNode, ComponentRegistry } from '@dsk/core';
+import { SECTION_PRESETS } from '@dsk/templates';
+import { useEditorConfiguration, useEditorStoreInstance } from '../EditorStoreContext';
 import {
   FileText,
   Layers,
@@ -25,9 +25,10 @@ import {
   LayoutGrid,
   Hash,
   Minus,
+  LayoutTemplate,
 } from 'lucide-react';
 
-type SidebarTab = 'layers' | 'components' | 'assets';
+type SidebarTab = 'layers' | 'components' | 'sections';
 type DropPosition = 'before' | 'after' | 'inside';
 
 // Helper pour associer la bonne icône selon le type de calque
@@ -53,11 +54,38 @@ export function getNodeIcon(type: string): React.ReactNode {
   }
 }
 
-function nodeLabel(node: ComponentNode): string {
-  const definition = getDefaultComponent(node.type);
+function nodeLabel(node: ComponentNode, registry: ComponentRegistry): string {
+  const definition = registry.get(node.type);
   const value = node.props.text ?? node.props.content ?? node.props.label ?? node.props.src;
   const detail = typeof value === 'string' && value.trim() ? ` — ${value.trim().slice(0, 20)}` : '';
   return node.name?.trim() || `${definition?.label ?? node.type}${detail}`;
+}
+
+function getSectionIcon(id: string): React.ReactNode {
+  switch (id) {
+    case 'header':
+      return <Layers size={15} />;
+    case 'hero':
+      return <LayoutTemplate size={15} />;
+    case 'hero-editorial':
+      return <ImageIcon size={15} />;
+    case 'feature-grid':
+      return <LayoutGrid size={15} />;
+    case 'product-collection':
+      return <Box size={15} />;
+    case 'testimonials':
+      return <FileText size={15} />;
+    case 'faq':
+      return <Search size={15} />;
+    case 'newsletter':
+      return <Plus size={15} />;
+    case 'call-to-action':
+      return <MousePointerClick size={15} />;
+    case 'footer':
+      return <Boxes size={15} />;
+    default:
+      return <LayoutTemplate size={15} />;
+  }
 }
 
 const LayerBranch = React.memo(function LayerBranch({
@@ -83,56 +111,92 @@ const LayerBranch = React.memo(function LayerBranch({
   onMove: (id: string, targetId: string, position: DropPosition) => boolean;
   depth?: number;
 }) {
-  const definition = getDefaultComponent(node.type);
-  const selected = useEditorStore((state) => state.selectedNodeId === node.id);
+  const { registry } = useEditorConfiguration();
+  const definition = registry.definitions.get(node.type);
+  const selected = useEditorStoreInstance((state) => state.selectedNodeId === node.id);
   const hasChildren = node.children.length > 0;
   const effectivelyLocked = inheritedLocked || node.locked;
   const [expanded, setExpanded] = useState(true);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(node.name ?? '');
+  const [dropPositionHint, setDropPositionHint] = useState<DropPosition | null>(null);
+  const [dropBlocked, setDropBlocked] = useState(false);
+  const layerRowRef = useRef<HTMLDivElement>(null);
   const skipRenameBlur = useRef(false);
 
   const commitName = () => {
     if (onRename(node.id, draftName)) setRenaming(false);
   };
 
-  const dropPosition = (event: React.DragEvent<HTMLLIElement>): DropPosition => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const ratio = (event.clientY - bounds.top) / Math.max(bounds.height, 1);
+  const getDropPosition = (clientY: number): DropPosition => {
+    const bounds = layerRowRef.current?.getBoundingClientRect();
+    if (!bounds) return 'after';
+    const ratio = (clientY - bounds.top) / Math.max(bounds.height, 1);
     if (definition?.canHaveChildren && ratio >= 0.25 && ratio <= 0.75) return 'inside';
     return ratio < 0.5 ? 'before' : 'after';
   };
 
   return (
     <li
-      className={`figma-layer-item ${effectivelyLocked ? 'is-locked' : ''}`}
+      className={[
+        'figma-layer-item',
+        effectivelyLocked ? 'is-locked' : '',
+        dropPositionHint ? `is-drop-${dropPositionHint}` : '',
+        dropBlocked ? 'is-drop-blocked' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       style={{ paddingLeft: `${depth * 14 + 8}px` }}
       onDragOver={(event) => {
-        if (effectivelyLocked || !event.dataTransfer.types.includes('application/x-dsk-node')) {
+        if (!event.dataTransfer.types.includes('application/x-dsk-node')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (effectivelyLocked) {
+          setDropPositionHint(null);
+          setDropBlocked(true);
           return;
         }
-        event.preventDefault();
-        event.stopPropagation();
+        setDropBlocked(false);
+        const nextPosition = getDropPosition(event.clientY);
+        setDropPositionHint((current) => (current === nextPosition ? current : nextPosition));
+      }}
+      onDragLeave={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        setDropPositionHint(null);
+        setDropBlocked(false);
       }}
       onDrop={(event) => {
-        const movingId = event.dataTransfer.getData('application/x-dsk-node');
-        if (!movingId || effectivelyLocked) return;
+        if (!event.dataTransfer.types.includes('application/x-dsk-node')) return;
         event.preventDefault();
         event.stopPropagation();
-        onMove(movingId, node.id, dropPosition(event));
+        const movingId = event.dataTransfer.getData('application/x-dsk-node');
+        if (movingId && !effectivelyLocked) {
+          onMove(movingId, node.id, getDropPosition(event.clientY));
+        }
+        setDropPositionHint(null);
+        setDropBlocked(false);
       }}
     >
-      <div className={`figma-layer-row ${selected ? 'is-selected' : ''}`}>
+      <div ref={layerRowRef} className={`figma-layer-row ${selected ? 'is-selected' : ''}`}>
         {/* Disclosure arrow */}
         <button
           type="button"
           className="figma-layer-chevron"
-          aria-label={`${expanded ? 'Réduire' : 'Développer'} ${nodeLabel(node)}`}
+          aria-label={`${expanded ? 'Réduire' : 'Développer'} ${nodeLabel(node, registry.definitions)}`}
           disabled={!hasChildren}
           onClick={() => setExpanded((curr) => !curr)}
         >
           {hasChildren ? (
-            expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
+            expanded ? (
+              <ChevronDown size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )
           ) : (
             <span className="figma-chevron-placeholder" />
           )}
@@ -185,7 +249,7 @@ const LayerBranch = React.memo(function LayerBranch({
               event.dataTransfer.effectAllowed = 'move';
             }}
           >
-            <span className="figma-layer-name">{nodeLabel(node)}</span>
+            <span className="figma-layer-name">{nodeLabel(node, registry.definitions)}</span>
           </button>
         )}
 
@@ -269,25 +333,27 @@ export const ComponentSidebar = React.memo(
     onToggleCollapsed?: () => void;
     onRenameDocument?: () => void;
   }) => {
-    const document = useEditorStore((state) => state.document);
-    const pages = useEditorStore((state) => state.pages);
-    const activePageId = useEditorStore((state) => state.activePageId);
-    const createPage = useEditorStore((state) => state.createPage);
-    const switchPage = useEditorStore((state) => state.switchPage);
-    const duplicatePage = useEditorStore((state) => state.duplicatePage);
-    const deletePage = useEditorStore((state) => state.deletePage);
-    const renamePage = useEditorStore((state) => state.renamePage);
+    const { registry } = useEditorConfiguration();
+    const document = useEditorStoreInstance((state) => state.document);
+    const pages = useEditorStoreInstance((state) => state.pages);
+    const activePageId = useEditorStoreInstance((state) => state.activePageId);
+    const createPage = useEditorStoreInstance((state) => state.createPage);
+    const switchPage = useEditorStoreInstance((state) => state.switchPage);
+    const duplicatePage = useEditorStoreInstance((state) => state.duplicatePage);
+    const deletePage = useEditorStoreInstance((state) => state.deletePage);
+    const renamePage = useEditorStoreInstance((state) => state.renamePage);
 
-    const addComponent = useEditorStore((state) => state.addComponent);
-    const selectNode = useEditorStore((state) => state.selectNode);
-    const updateNodeName = useEditorStore((state) => state.updateNodeName);
-    const setNodeLocked = useEditorStore((state) => state.setNodeLocked);
-    const setNodeHidden = useEditorStore((state) => state.setNodeHidden);
-    const setSectionLocked = useEditorStore((state) => state.setSectionLocked);
-    const setSectionHidden = useEditorStore((state) => state.setSectionHidden);
-    const duplicateNode = useEditorStore((state) => state.duplicateNode);
-    const deleteNode = useEditorStore((state) => state.deleteNode);
-    const moveNode = useEditorStore((state) => state.moveNode);
+    const addComponent = useEditorStoreInstance((state) => state.addComponent);
+    const addSection = useEditorStoreInstance((state) => state.addSection);
+    const selectNode = useEditorStoreInstance((state) => state.selectNode);
+    const updateNodeName = useEditorStoreInstance((state) => state.updateNodeName);
+    const setNodeLocked = useEditorStoreInstance((state) => state.setNodeLocked);
+    const setNodeHidden = useEditorStoreInstance((state) => state.setNodeHidden);
+    const setSectionLocked = useEditorStoreInstance((state) => state.setSectionLocked);
+    const setSectionHidden = useEditorStoreInstance((state) => state.setSectionHidden);
+    const duplicateNode = useEditorStoreInstance((state) => state.duplicateNode);
+    const deleteNode = useEditorStoreInstance((state) => state.deleteNode);
+    const moveNode = useEditorStoreInstance((state) => state.moveNode);
 
     const [activeTab, setActiveTab] = useState<SidebarTab>('layers');
     const [pageSearchOpen, setPageSearchOpen] = useState(false);
@@ -305,14 +371,15 @@ export const ComponentSidebar = React.memo(
 
     const filteredComponents = useMemo(() => {
       const q = componentSearch.trim().toLowerCase();
-      if (!q) return AVAILABLE_COMPONENTS;
-      return AVAILABLE_COMPONENTS.filter(
+      const availableComponents = Array.from(registry.definitions.values());
+      if (!q) return availableComponents;
+      return availableComponents.filter(
         (c) =>
           c.label.toLowerCase().includes(q) ||
           c.description.toLowerCase().includes(q) ||
-          c.category.toLowerCase().includes(q)
+          c.category.toLowerCase().includes(q),
       );
-    }, [componentSearch]);
+    }, [componentSearch, registry.definitions]);
 
     if (collapsed) {
       return (
@@ -331,27 +398,7 @@ export const ComponentSidebar = React.memo(
 
     return (
       <aside className="editor-sidebar figma-left-sidebar" id="editor-left-panel">
-        {/* Header: Project / Document Title */}
-        <div className="figma-sidebar-header">
-          <div className="figma-sidebar-header-title">
-            <span className="figma-brand-square">D</span>
-            <div className="figma-header-info">
-              <strong className="figma-header-name">{document.metadata.title}</strong>
-              <small className="figma-header-badge">DSK Engine</small>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="figma-icon-btn"
-            title="Réduire la sidebar"
-            aria-label="Réduire la sidebar"
-            onClick={onToggleCollapsed}
-          >
-            <ChevronRight size={14} className="figma-flip-h" />
-          </button>
-        </div>
-
-        {/* Tab switcher: Layers / Components / Assets */}
+        {/* Tab switcher: Layers / Components / Sections */}
         <div className="figma-subnav-tabs">
           <button
             type="button"
@@ -371,11 +418,11 @@ export const ComponentSidebar = React.memo(
           </button>
           <button
             type="button"
-            className={`figma-subnav-btn ${activeTab === 'assets' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('assets')}
+            className={`figma-subnav-btn ${activeTab === 'sections' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('sections')}
           >
-            <ImageIcon size={13} />
-            <span>Assets</span>
+            <LayoutTemplate size={13} />
+            <span>Sections</span>
           </button>
         </div>
 
@@ -600,9 +647,7 @@ export const ComponentSidebar = React.memo(
                     event.dataTransfer.effectAllowed = 'copy';
                   }}
                 >
-                  <span className="figma-component-card-icon">
-                    {getNodeIcon(component.type)}
-                  </span>
+                  <span className="figma-component-card-icon">{getNodeIcon(component.type)}</span>
                   <div className="figma-component-card-info">
                     <strong>{component.label}</strong>
                     <small>{component.description}</small>
@@ -613,15 +658,31 @@ export const ComponentSidebar = React.memo(
           </div>
         )}
 
-        {/* TAB 3: ASSETS */}
-        {activeTab === 'assets' && (
-          <div className="figma-assets-container">
-            <p className="figma-empty-note">
-              Ressources et images intégrées dans le projet actif.
-            </p>
+        {activeTab === 'sections' && (
+          <div className="figma-components-container">
+            <div className="figma-section-presets-grid">
+              {SECTION_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="figma-section-preset-card"
+                  title={preset.description}
+                  aria-label={`Ajouter la section ${preset.name} : ${preset.description}`}
+                  onClick={() => addSection(preset)}
+                >
+                  <span className="figma-section-preset-icon" aria-hidden="true">
+                    {getSectionIcon(preset.id)}
+                  </span>
+                  <div className="figma-section-preset-info">
+                    <strong>{preset.name}</strong>
+                    <small>{preset.description}</small>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </aside>
     );
-  }
+  },
 );

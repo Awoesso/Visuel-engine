@@ -1,6 +1,5 @@
 import React, { useState, PropsWithChildren } from 'react';
 
-
 export interface CollapsibleSectionProps {
   title: string;
   defaultOpen?: boolean;

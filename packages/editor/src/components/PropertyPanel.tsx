@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ComponentNode, ElementStyles } from '@dsk/core';
-import { getDefaultComponent } from '../constants';
-import { isNodeEffectivelyLocked, useEditorStore } from '../store';
+import { useEditorConfiguration, useEditorStoreInstance } from '../EditorStoreContext';
+import { isNodeEffectivelyLocked } from '../store';
 import { FillEditor } from './ui/FillEditor';
 import { SpacingBox } from './ui/SpacingBox';
 import {
@@ -44,13 +44,14 @@ export const PropertyPanel = React.memo(
     onToggleCollapsed?: () => void;
     selectedNodeId?: string | null;
   }) => {
-    const document = useEditorStore((state) => state.document);
-    const storeSelectedNodeId = useEditorStore((state) => state.selectedNodeId);
+    const { registry } = useEditorConfiguration();
+    const document = useEditorStoreInstance((state) => state.document);
+    const storeSelectedNodeId = useEditorStoreInstance((state) => state.selectedNodeId);
     const selectedNodeId =
       controlledSelectedNodeId !== undefined ? controlledSelectedNodeId : storeSelectedNodeId;
-    const updateNodeProps = useEditorStore((state) => state.updateNodeProps);
-    const updateNodeStyles = useEditorStore((state) => state.updateNodeStyles);
-    const viewport = useEditorStore((state) => state.viewport);
+    const updateNodeProps = useEditorStoreInstance((state) => state.updateNodeProps);
+    const updateNodeStyles = useEditorStoreInstance((state) => state.updateNodeStyles);
+    const viewport = useEditorStoreInstance((state) => state.viewport);
     const [inspectorTab, setInspectorTab] = useState<'design' | 'prototype'>('design');
 
     // Section collapse states
@@ -75,7 +76,7 @@ export const PropertyPanel = React.memo(
           .find((node) => node !== undefined)
       : undefined;
 
-    const definition = selectedNode ? getDefaultComponent(selectedNode.type) : undefined;
+    const definition = selectedNode ? registry.definitions.get(selectedNode.type) : undefined;
     const selectedNodeLocked = selectedNode
       ? isNodeEffectivelyLocked(document, selectedNode.id)
       : false;
@@ -124,7 +125,10 @@ export const PropertyPanel = React.memo(
               <Layers size={28} />
             </div>
             <strong>Aucun élément sélectionné</strong>
-            <p>Sélectionnez un composant sur le canvas ou dans les calques pour inspecter et modifier ses propriétés.</p>
+            <p>
+              Sélectionnez un composant sur le canvas ou dans les calques pour inspecter et modifier
+              ses propriétés.
+            </p>
           </div>
         </aside>
       );
@@ -132,11 +136,6 @@ export const PropertyPanel = React.memo(
 
     const currentStyles: ElementStyles = selectedNode.styles[viewport] ?? {};
 
-    const handleStyleChange = (patch: Partial<ElementStyles>) => {
-      updateNodeStyles(selectedNode.id, viewport, patch);
-    };
-
-    // Contextual checks
     const isTextComponent =
       selectedNode.type === 'core/heading' ||
       selectedNode.type === 'core/text' ||
@@ -147,6 +146,42 @@ export const PropertyPanel = React.memo(
       selectedNode.type === 'core/container' ||
       selectedNode.type === 'core/grid' ||
       Boolean(definition?.canHaveChildren);
+
+    const showAutoLayout = Boolean(
+      isLayoutComponent ||
+      currentStyles.display ||
+      currentStyles.flexDirection ||
+      currentStyles.gridTemplateColumns ||
+      currentStyles.gap,
+    );
+
+    const showAppearance = Boolean(
+      !isTextComponent ||
+      currentStyles.opacity !== undefined ||
+      currentStyles.borderRadius !== undefined ||
+      currentStyles.boxShadow ||
+      currentStyles.display,
+    );
+
+    const showFill = Boolean(
+      !isTextComponent ||
+      currentStyles.backgroundColor ||
+      currentStyles.backgroundImage ||
+      selectedNode.type === 'core/button' ||
+      selectedNode.type === 'core/container' ||
+      selectedNode.type === 'core/grid',
+    );
+
+    const showStroke = Boolean(
+      !isTextComponent ||
+      currentStyles.borderColor ||
+      currentStyles.borderWidth ||
+      currentStyles.borderStyle,
+    );
+
+    const handleStyleChange = (patch: Partial<ElementStyles>) => {
+      updateNodeStyles(selectedNode.id, viewport, patch);
+    };
 
     const hasSpecificProps = definition && Object.keys(definition.controls).length > 0;
 
@@ -277,7 +312,9 @@ export const PropertyPanel = React.memo(
                       className="figma-compact-input"
                       placeholder="Auto"
                       value={currentStyles.width ?? ''}
-                      onChange={(e) => handleStyleChange({ width: e.target.value.trim() || undefined })}
+                      onChange={(e) =>
+                        handleStyleChange({ width: e.target.value.trim() || undefined })
+                      }
                     />
                   </div>
                   <div className="figma-field-compact">
@@ -287,7 +324,9 @@ export const PropertyPanel = React.memo(
                       className="figma-compact-input"
                       placeholder="Auto"
                       value={currentStyles.height ?? ''}
-                      onChange={(e) => handleStyleChange({ height: e.target.value.trim() || undefined })}
+                      onChange={(e) =>
+                        handleStyleChange({ height: e.target.value.trim() || undefined })
+                      }
                     />
                   </div>
                 </div>
@@ -301,7 +340,9 @@ export const PropertyPanel = React.memo(
                       className="figma-compact-input"
                       placeholder="None"
                       value={currentStyles.minWidth ?? ''}
-                      onChange={(e) => handleStyleChange({ minWidth: e.target.value.trim() || undefined })}
+                      onChange={(e) =>
+                        handleStyleChange({ minWidth: e.target.value.trim() || undefined })
+                      }
                     />
                   </div>
                   <div className="figma-field-compact">
@@ -311,7 +352,9 @@ export const PropertyPanel = React.memo(
                       className="figma-compact-input"
                       placeholder="None"
                       value={currentStyles.maxWidth ?? ''}
-                      onChange={(e) => handleStyleChange({ maxWidth: e.target.value.trim() || undefined })}
+                      onChange={(e) =>
+                        handleStyleChange({ maxWidth: e.target.value.trim() || undefined })
+                      }
                     />
                   </div>
                 </div>
@@ -320,7 +363,7 @@ export const PropertyPanel = React.memo(
           </div>
 
           {/* SECTION 2: AUTO LAYOUT (Flex & Grid) */}
-          {isLayoutComponent && (
+          {showAutoLayout && (
             <div className="figma-section-group">
               <button
                 type="button"
@@ -490,7 +533,9 @@ export const PropertyPanel = React.memo(
                         className="figma-compact-input"
                         placeholder="16px"
                         value={currentStyles.fontSize ?? ''}
-                        onChange={(e) => handleStyleChange({ fontSize: e.target.value.trim() || undefined })}
+                        onChange={(e) =>
+                          handleStyleChange({ fontSize: e.target.value.trim() || undefined })
+                        }
                       />
                     </div>
                     <div className="figma-field-compact">
@@ -498,7 +543,9 @@ export const PropertyPanel = React.memo(
                       <select
                         className="figma-compact-select"
                         value={currentStyles.fontWeight ?? 'normal'}
-                        onChange={(e) => handleStyleChange({ fontWeight: e.target.value || undefined })}
+                        onChange={(e) =>
+                          handleStyleChange({ fontWeight: e.target.value || undefined })
+                        }
                       >
                         <option value="400">Regular (400)</option>
                         <option value="500">Medium (500)</option>
@@ -552,7 +599,9 @@ export const PropertyPanel = React.memo(
                         className="figma-compact-input"
                         placeholder="#172033"
                         value={currentStyles.color ?? ''}
-                        onChange={(e) => handleStyleChange({ color: e.target.value.trim() || undefined })}
+                        onChange={(e) =>
+                          handleStyleChange({ color: e.target.value.trim() || undefined })
+                        }
                       />
                     </div>
                   </div>
@@ -562,152 +611,166 @@ export const PropertyPanel = React.memo(
           )}
 
           {/* SECTION 4: APPEARANCE (Opacity & Corner Radius) */}
-          <div className="figma-section-group">
-            <button
-              type="button"
-              className="figma-accordion-header"
-              onClick={() => toggleSection('appearance')}
-            >
-              <div className="figma-accordion-title">
-                {openSections.appearance ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <span>Appearance</span>
-              </div>
-            </button>
+          {showAppearance && (
+            <div className="figma-section-group">
+              <button
+                type="button"
+                className="figma-accordion-header"
+                onClick={() => toggleSection('appearance')}
+              >
+                <div className="figma-accordion-title">
+                  {openSections.appearance ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>Appearance</span>
+                </div>
+              </button>
 
-            {openSections.appearance && (
-              <div className="figma-accordion-body">
-                {/* Opacity */}
-                <div className="figma-control-row">
-                  <span className="figma-control-label">Opacité</span>
-                  <div className="figma-slider-input-group">
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      className="figma-range-slider"
-                      value={currentStyles.opacity ?? 1}
-                      onChange={(e) => handleStyleChange({ opacity: Number(e.target.value) })}
-                    />
-                    <span className="figma-slider-val">
-                      {Math.round((currentStyles.opacity ?? 1) * 100)}%
-                    </span>
+              {openSections.appearance && (
+                <div className="figma-accordion-body">
+                  {/* Opacity */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Opacité</span>
+                    <div className="figma-slider-input-group">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        className="figma-range-slider"
+                        value={currentStyles.opacity ?? 1}
+                        onChange={(e) => handleStyleChange({ opacity: Number(e.target.value) })}
+                      />
+                      <span className="figma-slider-val">
+                        {Math.round((currentStyles.opacity ?? 1) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Corner Radius */}
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Rayon (Radius)</span>
+                    <div className="figma-unit-input-wrap">
+                      <input
+                        type="number"
+                        className="figma-compact-input"
+                        placeholder="0"
+                        value={parsePx(currentStyles.borderRadius)}
+                        onChange={(e) =>
+                          handleStyleChange({
+                            borderRadius: e.target.value ? `${e.target.value}px` : undefined,
+                          })
+                        }
+                      />
+                      <span className="figma-unit">px</span>
+                    </div>
                   </div>
                 </div>
-
-                {/* Corner Radius */}
-                <div className="figma-control-row">
-                  <span className="figma-control-label">Rayon (Radius)</span>
-                  <div className="figma-unit-input-wrap">
-                    <input
-                      type="number"
-                      className="figma-compact-input"
-                      placeholder="0"
-                      value={parsePx(currentStyles.borderRadius)}
-                      onChange={(e) =>
-                        handleStyleChange({
-                          borderRadius: e.target.value ? `${e.target.value}px` : undefined,
-                        })
-                      }
-                    />
-                    <span className="figma-unit">px</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* SECTION 5: FILL (Système de remplissage Figma) */}
-          <div className="figma-section-group">
-            <button
-              type="button"
-              className="figma-accordion-header"
-              onClick={() => toggleSection('fill')}
-            >
-              <div className="figma-accordion-title">
-                {openSections.fill ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <span>Fill</span>
-              </div>
-            </button>
+          {showFill && (
+            <div className="figma-section-group">
+              <button
+                type="button"
+                className="figma-accordion-header"
+                onClick={() => toggleSection('fill')}
+              >
+                <div className="figma-accordion-title">
+                  {openSections.fill ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>Fill</span>
+                </div>
+              </button>
 
-            {openSections.fill && (
-              <div className="figma-accordion-body">
-                <FillEditor styles={currentStyles} onChange={handleStyleChange} />
-              </div>
-            )}
-          </div>
+              {openSections.fill && (
+                <div className="figma-accordion-body">
+                  <FillEditor
+                    styles={currentStyles}
+                    onChange={handleStyleChange}
+                    disabled={selectedNodeLocked}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* SECTION 6: STROKE (Contour / Bordure) */}
-          <div className="figma-section-group">
-            <button
-              type="button"
-              className="figma-accordion-header"
-              onClick={() => toggleSection('stroke')}
-            >
-              <div className="figma-accordion-title">
-                {openSections.stroke ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <span>Stroke</span>
-              </div>
-            </button>
+          {showStroke && (
+            <div className="figma-section-group">
+              <button
+                type="button"
+                className="figma-accordion-header"
+                onClick={() => toggleSection('stroke')}
+              >
+                <div className="figma-accordion-title">
+                  {openSections.stroke ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>Stroke</span>
+                </div>
+              </button>
 
-            {openSections.stroke && (
-              <div className="figma-accordion-body">
-                <div className="figma-control-row">
-                  <span className="figma-control-label">Couleur</span>
-                  <div className="figma-color-input-row">
-                    <input
-                      type="color"
-                      className="figma-mini-color"
-                      value={
-                        typeof currentStyles.borderColor === 'string' &&
-                        /^#[0-9a-f]{6}$/i.test(currentStyles.borderColor)
-                          ? currentStyles.borderColor
-                          : '#e2e8f0'
-                      }
-                      onChange={(e) => handleStyleChange({ borderColor: e.target.value })}
-                    />
-                    <input
-                      type="text"
-                      className="figma-compact-input"
-                      placeholder="#E2E8F0"
-                      value={currentStyles.borderColor ?? ''}
-                      onChange={(e) => handleStyleChange({ borderColor: e.target.value.trim() || undefined })}
-                    />
+              {openSections.stroke && (
+                <div className="figma-accordion-body">
+                  <div className="figma-control-row">
+                    <span className="figma-control-label">Couleur</span>
+                    <div className="figma-color-input-row">
+                      <input
+                        type="color"
+                        className="figma-mini-color"
+                        value={
+                          typeof currentStyles.borderColor === 'string' &&
+                          /^#[0-9a-f]{6}$/i.test(currentStyles.borderColor)
+                            ? currentStyles.borderColor
+                            : '#e2e8f0'
+                        }
+                        onChange={(e) => handleStyleChange({ borderColor: e.target.value })}
+                      />
+                      <input
+                        type="text"
+                        className="figma-compact-input"
+                        placeholder="#E2E8F0"
+                        value={currentStyles.borderColor ?? ''}
+                        onChange={(e) =>
+                          handleStyleChange({ borderColor: e.target.value.trim() || undefined })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="figma-fields-grid-2">
+                    <div className="figma-field-compact">
+                      <span className="figma-field-label">Largeur</span>
+                      <input
+                        type="text"
+                        className="figma-compact-input"
+                        placeholder="0px"
+                        value={currentStyles.borderWidth ?? ''}
+                        onChange={(e) =>
+                          handleStyleChange({ borderWidth: e.target.value.trim() || undefined })
+                        }
+                      />
+                    </div>
+                    <div className="figma-field-compact">
+                      <span className="figma-field-label">Style</span>
+                      <select
+                        className="figma-compact-select"
+                        value={currentStyles.borderStyle ?? 'solid'}
+                        onChange={(e) =>
+                          handleStyleChange({
+                            borderStyle: e.target.value as ElementStyles['borderStyle'],
+                          })
+                        }
+                      >
+                        <option value="none">Aucun</option>
+                        <option value="solid">Solide</option>
+                        <option value="dashed">Tirets</option>
+                        <option value="dotted">Points</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
-
-                <div className="figma-fields-grid-2">
-                  <div className="figma-field-compact">
-                    <span className="figma-field-label">Largeur</span>
-                    <input
-                      type="text"
-                      className="figma-compact-input"
-                      placeholder="0px"
-                      value={currentStyles.borderWidth ?? ''}
-                      onChange={(e) => handleStyleChange({ borderWidth: e.target.value.trim() || undefined })}
-                    />
-                  </div>
-                  <div className="figma-field-compact">
-                    <span className="figma-field-label">Style</span>
-                    <select
-                      className="figma-compact-select"
-                      value={currentStyles.borderStyle ?? 'solid'}
-                      onChange={(e) =>
-                        handleStyleChange({
-                          borderStyle: e.target.value as ElementStyles['borderStyle'],
-                        })
-                      }
-                    >
-                      <option value="none">Aucun</option>
-                      <option value="solid">Solide</option>
-                      <option value="dashed">Tirets</option>
-                      <option value="dotted">Points</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* SECTION 7: COMPONENT SPECIFIC PROPS */}
           {hasSpecificProps && (
@@ -733,13 +796,17 @@ export const PropertyPanel = React.memo(
                           className="figma-textarea"
                           rows={3}
                           value={String(selectedNode.props[name] ?? control.defaultValue ?? '')}
-                          onChange={(e) => updateNodeProps(selectedNode.id, { [name]: e.target.value })}
+                          onChange={(e) =>
+                            updateNodeProps(selectedNode.id, { [name]: e.target.value })
+                          }
                         />
                       ) : control.type === 'select' ? (
                         <select
                           className="figma-select"
                           value={String(selectedNode.props[name] ?? control.defaultValue ?? '')}
-                          onChange={(e) => updateNodeProps(selectedNode.id, { [name]: e.target.value })}
+                          onChange={(e) =>
+                            updateNodeProps(selectedNode.id, { [name]: e.target.value })
+                          }
                         >
                           {(control.options ?? []).map((opt) => (
                             <option key={String(opt.value)} value={String(opt.value)}>
@@ -752,7 +819,9 @@ export const PropertyPanel = React.memo(
                           type="checkbox"
                           className="figma-checkbox"
                           checked={selectedNode.props[name] === true}
-                          onChange={(e) => updateNodeProps(selectedNode.id, { [name]: e.target.checked })}
+                          onChange={(e) =>
+                            updateNodeProps(selectedNode.id, { [name]: e.target.checked })
+                          }
                         />
                       ) : (
                         <input
@@ -762,7 +831,8 @@ export const PropertyPanel = React.memo(
                           placeholder={control.placeholder}
                           onChange={(e) =>
                             updateNodeProps(selectedNode.id, {
-                              [name]: control.type === 'number' ? Number(e.target.value) : e.target.value,
+                              [name]:
+                                control.type === 'number' ? Number(e.target.value) : e.target.value,
                             })
                           }
                         />

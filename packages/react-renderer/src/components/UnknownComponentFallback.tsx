@@ -13,13 +13,7 @@ export const UnknownComponentFallback: React.FC<UnknownComponentFallbackProps> =
 }) => {
   // In production storefront render mode, render an unobtrusive fallback
   if (mode === 'render') {
-    return (
-      <div
-        data-dsk-unknown-node={node.id}
-        style={{ display: 'none' }}
-        aria-hidden="true"
-      />
-    );
+    return <div data-dsk-unknown-node={node.id} style={{ display: 'none' }} aria-hidden="true" />;
   }
 
   // In preview / edit mode, display an actionable diagnostic indicator

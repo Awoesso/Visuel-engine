@@ -1,71 +1,54 @@
 import React from 'react';
 import Link from 'next/link';
 
-const pageStyle: React.CSSProperties = {
-  minHeight: '100vh',
-  padding: '72px 24px',
-  background: 'linear-gradient(145deg, #f8f9ff 0%, #eef2ff 100%)',
-  color: '#172033',
-  fontFamily: "var(--font-geist-sans, 'Geist'), Arial, sans-serif",
-};
+const features = [
+  {
+    title: 'Rendu typé',
+    description: 'Chaque document est validé par le schéma partagé de @dsk/core.',
+  },
+  {
+    title: 'Composants réutilisables',
+    description: 'Un registre commun relie les composants à leur rendu et à leurs propriétés.',
+  },
+  {
+    title: 'Aperçu responsive',
+    description: 'Prévisualisez vos pages sur ordinateur, tablette et mobile.',
+  },
+] as const;
 
 export const Playground: React.FC = () => (
-  <main style={pageStyle}>
-    <div style={{ maxWidth: 960, margin: '0 auto' }}>
-      <p style={{ color: '#4f46e5', fontSize: 12, fontWeight: 800, letterSpacing: '0.14em' }}>
-        DSK VISUAL ENGINE
-      </p>
-      <h1 style={{ maxWidth: 680, margin: '14px 0', fontSize: 48, lineHeight: 1.08 }}>
-        Assemblez des pages avec des composants réutilisables.
-      </h1>
-      <p style={{ maxWidth: 600, color: '#657087', fontSize: 17, lineHeight: 1.7 }}>
-        Le Playground présente le moteur de rendu et son éditeur visuel. Le document de
-        démonstration utilise le schéma et le registre de composants partagés.
-      </p>
-      <Link
-        href="/editor"
-        style={{
-          display: 'inline-flex',
-          marginTop: 16,
-          padding: '12px 18px',
-          borderRadius: 8,
-          background: '#4f46e5',
-          color: '#fff',
-          fontWeight: 700,
-          textDecoration: 'none',
-        }}
-      >
-        Ouvrir l’éditeur
-      </Link>
-      <section
-        aria-label="Fonctionnalités du Playground"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 16,
-          marginTop: 64,
-        }}
-      >
-        {(
-          [
-            ['Rendu typé', 'Les documents sont validés par le schéma réel de @dsk/core.'],
-            ['Registry partagé', 'Les composants core sont résolus par leurs IDs de registre.'],
-            ['Aperçu responsive', 'Basculez entre les largeurs Desktop, Tablet et Mobile.'],
-          ] as const
-        ).map(([title, description]) => (
-          <article
-            key={title}
-            style={{
-              padding: 22,
-              border: '1px solid #e3e7f2',
-              borderRadius: 12,
-              background: '#fff',
-            }}
-          >
-            <h2 style={{ margin: '0 0 8px', fontSize: 17 }}>{title}</h2>
-            <p style={{ margin: 0, color: '#657087', fontSize: 13, lineHeight: 1.6 }}>
-              {description}
-            </p>
+  <main className="playground-home">
+    <div className="playground-home-inner">
+      <nav className="playground-home-nav" aria-label="Navigation principale">
+        <div className="playground-home-brand">
+          <span className="playground-home-brand-mark" aria-hidden="true">
+            D
+          </span>
+          <span>DSK Visual Engine</span>
+        </div>
+        <Link className="playground-home-nav-link" href="/editor">
+          Ouvrir l’éditeur <span aria-hidden="true">↗</span>
+        </Link>
+      </nav>
+
+      <section className="playground-home-hero">
+        <span className="playground-kicker">PLAYGROUND · ÉDITEUR VISUEL</span>
+        <h1>Des pages soignées. Sans partir de zéro.</h1>
+        <p className="playground-home-copy">
+          Composez des expériences storefront avec des composants réutilisables, un rendu contrôlé
+          et un aperçu adapté à chaque écran.
+        </p>
+        <Link className="playground-home-cta" href="/editor">
+          <span>Explorer l’éditeur</span>
+          <span aria-hidden="true">→</span>
+        </Link>
+      </section>
+
+      <section className="playground-home-features" aria-label="Fonctionnalités du Playground">
+        {features.map(({ title, description }) => (
+          <article className="playground-feature-card" key={title}>
+            <h2>{title}</h2>
+            <p>{description}</p>
           </article>
         ))}
       </section>

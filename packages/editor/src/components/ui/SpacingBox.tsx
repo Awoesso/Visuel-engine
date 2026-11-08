@@ -28,7 +28,7 @@ export const SpacingBox: React.FC<SpacingBoxProps> = ({
   disabled = false,
 }) => {
   const [isLinked, setIsLinked] = useState(
-    Boolean(top && top === right && top === bottom && top === left)
+    Boolean(top && top === right && top === bottom && top === left),
   );
 
   const topParsed = parseValueUnit(top);

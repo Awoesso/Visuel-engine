@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { useEditorStore, assertValidDocument } from '../store';
 import {
-  useEditorStore,
-  assertValidDocument,
-} from '../store';
-import { CURRENT_SCHEMA_VERSION, PageDocumentSchema, type PageDocument, type ComponentNode } from '@dsk/core';
+  CURRENT_SCHEMA_VERSION,
+  PageDocumentSchema,
+  type PageDocument,
+  type ComponentNode,
+} from '@dsk/core';
 
 /**
  * Helper to build a valid, realistic PageDocument containing an exact number of total nodes.

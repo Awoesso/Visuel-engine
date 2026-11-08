@@ -1,9 +1,6 @@
 import { PageDocumentSchema, type PageDocument } from '../schemas/document';
 import type { ComponentNode } from '../schemas/node';
-import {
-  SECURITY_LIMITS,
-  inspectTreeMetrics,
-} from './security';
+import { SECURITY_LIMITS, inspectTreeMetrics } from './security';
 
 export interface ValidationErrorItem {
   path: string;

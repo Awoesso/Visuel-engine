@@ -12,10 +12,7 @@ interface SafeErrorBoundaryState {
   error?: Error;
 }
 
-export class SafeErrorBoundary extends Component<
-  SafeErrorBoundaryProps,
-  SafeErrorBoundaryState
-> {
+export class SafeErrorBoundary extends Component<SafeErrorBoundaryProps, SafeErrorBoundaryState> {
   constructor(props: SafeErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };

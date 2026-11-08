@@ -10,10 +10,7 @@ export { RendererContext } from './context/RendererContext';
 export { useRenderer } from './context/useRenderer';
 
 // Utils
-export {
-  resolveResponsiveStyles,
-  elementStylesToCssProperties,
-} from './utils/styleResolver';
+export { resolveResponsiveStyles, elementStylesToCssProperties } from './utils/styleResolver';
 
 // Types
 export type {

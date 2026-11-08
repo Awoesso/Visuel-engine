@@ -1,5 +1,5 @@
 import React from 'react';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { isSafeUrl, type ComponentDefinition } from '@dsk/core';
 import type { RenderComponentProps } from '@dsk/react-renderer';
 
@@ -46,10 +46,7 @@ const SIZE_STYLES: Record<string, React.CSSProperties> = {
   lg: { padding: '14px 28px', fontSize: '1.125rem' },
 };
 
-export const Button: React.FC<RenderComponentProps<ButtonInputProps>> = ({
-  props,
-  style,
-}) => {
+export const Button: React.FC<RenderComponentProps<ButtonInputProps>> = ({ props, style }) => {
   const safeProps = ButtonPropsSchema.parse(props || {});
 
   const combinedStyle: React.CSSProperties = {

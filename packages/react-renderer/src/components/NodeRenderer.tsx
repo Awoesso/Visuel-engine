@@ -53,7 +53,9 @@ const NodeRendererView: React.FC<NodeRendererProps> = ({
   }
 
   // Sanitize URLs in props (anti-XSS)
-  const safeProps = node.props ? sanitizePropsUrls(node.props) : {};
+  const safeProps = node.props
+    ? sanitizePropsUrls(node.props, { allowDataImages: node.type === 'core/image' })
+    : {};
 
   // Resolve responsive styles for current viewport
   const elementStyles = resolveResponsiveStyles(node.styles, viewport);

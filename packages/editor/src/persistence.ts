@@ -86,9 +86,7 @@ export function saveDocument(
 ): string {
   const validation = validatePageDocument(document);
   if (!validation.success) {
-    throw new Error(
-      validation.errors.map(({ path, message }) => `${path}: ${message}`).join('; '),
-    );
+    throw new Error(validation.errors.map(({ path, message }) => `${path}: ${message}`).join('; '));
   }
 
   const savedAt = now().toISOString();

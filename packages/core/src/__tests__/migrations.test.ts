@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  migrateAndValidateDocument,
-  registerMigration,
-} from '../migrations';
+import { migrateAndValidateDocument, registerMigration } from '../migrations';
 import { CURRENT_SCHEMA_VERSION } from '../schemas/document';
 
 describe('Document Migrations', () => {

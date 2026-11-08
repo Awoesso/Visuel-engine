@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PageRenderer } from '@dsk/react-renderer';
-import { defaultRendererRegistry } from '@dsk/components';
-import type { ComponentNode, PageDocument } from '@dsk/core';
-import { getDefaultComponent } from '../constants';
-import { useEditorStore } from '../store';
+import type { ComponentNode, ComponentRegistry, PageDocument } from '@dsk/core';
+import { resolveEditorTheme } from '../config';
+import {
+  useEditorConfiguration,
+  useEditorStoreApi,
+  useEditorStoreInstance,
+} from '../EditorStoreContext';
 import { FallbackComponent } from '../fallback';
 import {
   MousePointer,
@@ -18,9 +21,25 @@ import {
   Maximize2,
   ZoomIn,
   ZoomOut,
+  Eye,
+  Pencil,
 } from 'lucide-react';
 
 type DropPosition = 'before' | 'after' | 'inside';
+type EditorCanvasProps = {
+  preview?: boolean;
+  onTogglePreview?: () => void;
+  isEditorEventTarget?: (target: EventTarget | null) => boolean;
+};
+type ContextMenuPosition = { x: number; y: number; nodeId: string | null };
+type ZoomAnchor = {
+  clientX: number;
+  clientY: number;
+  canvasX: number;
+  canvasY: number;
+  stageX: number;
+  stageY: number;
+};
 type DropHint = {
   id: string;
   position: DropPosition;
@@ -36,11 +55,12 @@ function resolveDropPosition(
   clientY: number,
   targetElement: HTMLElement,
   type: string,
+  registry: ComponentRegistry,
 ): { position: DropPosition; axis: 'horizontal' | 'vertical' } {
   const bounds = targetElement.getBoundingClientRect();
   const offsetX = (clientX - bounds.left) / Math.max(bounds.width, 1);
   const offsetY = (clientY - bounds.top) / Math.max(bounds.height, 1);
-  const definition = getDefaultComponent(type);
+  const definition = registry.get(type);
   if (
     definition?.canHaveChildren &&
     offsetX >= 0.25 &&
@@ -98,8 +118,9 @@ const EditableNodeFrame: React.FC<{
   deleteNode,
   moveNodeBy,
 }) => {
-  const selected = useEditorStore((state) => state.selectedNodeId === node.id);
-  const definition = getDefaultComponent(node.type);
+  const { registry } = useEditorConfiguration();
+  const selected = useEditorStoreInstance((state) => state.selectedNodeId === node.id);
+  const definition = registry.definitions.get(node.type);
   const canMove = selected && !locked;
 
   return (
@@ -184,25 +205,50 @@ const EditableNodeFrame: React.FC<{
   );
 };
 
-export const EditorCanvas = React.memo(({ preview = false }: { preview?: boolean }) => {
-  const document = useEditorStore((state) => state.document);
+export const EditorCanvas = React.memo((props: EditorCanvasProps) => {
+  const { preview = false, onTogglePreview, isEditorEventTarget } = props;
+  const { registry, theme } = useEditorConfiguration();
+  const store = useEditorStoreApi();
+  const document = useEditorStoreInstance((state) => state.document);
   const nodeIndex = useMemo(() => indexDocumentNodes(document), [document]);
-  const selectNode = useEditorStore((state) => state.selectNode);
-  const duplicateNode = useEditorStore((state) => state.duplicateNode);
-  const deleteNode = useEditorStore((state) => state.deleteNode);
-  const moveNodeBy = useEditorStore((state) => state.moveNodeBy);
-  const moveNode = useEditorStore((state) => state.moveNode);
-  const moveNodeToSection = useEditorStore((state) => state.moveNodeToSection);
-  const addComponentAt = useEditorStore((state) => state.addComponentAt);
-  const addComponentToSection = useEditorStore((state) => state.addComponentToSection);
-  const viewport = useEditorStore((state) => state.viewport);
-  const zoom = useEditorStore((state) => state.zoom);
-  const setZoom = useEditorStore((state) => state.setZoom);
+  const rendererTheme = useMemo(
+    () => resolveEditorTheme(document.theme, theme),
+    [document.theme, theme],
+  );
+  const rendererDocument = useMemo(
+    () => ({ ...document, theme: rendererTheme }),
+    [document, rendererTheme],
+  );
+  const selectNode = useEditorStoreInstance((state) => state.selectNode);
+  const duplicateNode = useEditorStoreInstance((state) => state.duplicateNode);
+  const deleteNode = useEditorStoreInstance((state) => state.deleteNode);
+  const moveNodeBy = useEditorStoreInstance((state) => state.moveNodeBy);
+  const moveNode = useEditorStoreInstance((state) => state.moveNode);
+  const moveNodeToSection = useEditorStoreInstance((state) => state.moveNodeToSection);
+  const addComponentAt = useEditorStoreInstance((state) => state.addComponentAt);
+  const addComponentToSection = useEditorStoreInstance((state) => state.addComponentToSection);
+  const viewport = useEditorStoreInstance((state) => state.viewport);
+  const zoom = useEditorStoreInstance((state) => state.zoom);
+  const setZoom = useEditorStoreInstance((state) => state.setZoom);
+  const selectedNodeId = useEditorStoreInstance((state) => state.selectedNodeId);
   const [dropMessage, setDropMessage] = useState<string | null>(null);
   const [canvasHeight, setCanvasHeight] = useState(900);
+  const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const dropHintRef = useRef<DropHint | null>(null);
+  const panStartRef = useRef<{
+    x: number;
+    y: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
+  const zoomAnchorRef = useRef<ZoomAnchor | null>(null);
+  const didPanRef = useRef(false);
 
   const updateDropHint = (next: DropHint | null) => {
     const current = dropHintRef.current;
@@ -239,15 +285,275 @@ export const EditorCanvas = React.memo(({ preview = false }: { preview?: boolean
     return () => window.cancelAnimationFrame(frame);
   }, [viewport]);
 
-  const addComponent = useEditorStore((state) => state.addComponent);
-  const setViewport = useEditorStore((state) => state.setViewport);
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    const stage = stageRef.current;
+    const canvas = canvasRef.current?.parentElement;
+    if (!anchor || !stage || !canvas) return;
+
+    zoomAnchorRef.current = null;
+    const stageBounds = stage.getBoundingClientRect();
+    const canvasBounds = canvas.getBoundingClientRect();
+    const canvasContentLeft = canvasBounds.left - stageBounds.left + stage.scrollLeft;
+    const canvasContentTop = canvasBounds.top - stageBounds.top + stage.scrollTop;
+    stage.scrollLeft = canvasContentLeft + anchor.canvasX * zoom - anchor.stageX;
+    stage.scrollTop = canvasContentTop + anchor.canvasY * zoom - anchor.stageY;
+  }, [zoom]);
+
+  const addComponent = useEditorStoreInstance((state) => state.addComponent);
+  const setViewport = useEditorStoreInstance((state) => state.setViewport);
   const [activeTool, setActiveTool] = useState<'pointer' | 'hand'>('pointer');
 
-  const fitCanvas = () => {
+  const fitCanvas = React.useCallback(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const availableWidth = Math.max(100, stage.clientWidth - 64);
     setZoom(Math.min(1.5, availableWidth / widthMap[viewport]));
+  }, [setZoom, viewport]);
+
+  const zoomBy = React.useCallback(
+    (amount: number) => setZoom(store.getState().zoom + amount),
+    [setZoom, store],
+  );
+
+  useEffect(() => {
+    const isTextEntry = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isEditorEventTarget?.(event.target)) return;
+      if (isTextEntry(event.target)) return;
+      if (event.key === 'Shift') {
+        setShiftHeld(true);
+        return;
+      }
+      if (event.code === 'Space' && !event.repeat) {
+        const target = event.target;
+        if (target instanceof HTMLElement && target.closest('button, [role="menu"]')) return;
+        event.preventDefault();
+        setSpaceHeld(true);
+        return;
+      }
+
+      if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (event.key.toLowerCase() === 'h') setActiveTool('hand');
+        else if (event.key.toLowerCase() === 'v') setActiveTool('pointer');
+        return;
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() === 'd' && selectedNodeId) {
+        const selected = nodeIndex.get(selectedNodeId);
+        if (selected && !selected.locked) {
+          event.preventDefault();
+          duplicateNode(selectedNodeId);
+        }
+      } else if (event.key === '+' || event.key === '=' || event.key === 'Add') {
+        event.preventDefault();
+        zoomBy(0.1);
+      } else if (event.key === '-' || event.key === 'Subtract') {
+        event.preventDefault();
+        zoomBy(-0.1);
+      } else if (event.key === '0') {
+        event.preventDefault();
+        fitCanvas();
+      } else if (event.key === '1') {
+        event.preventDefault();
+        setZoom(1);
+      }
+      return;
+    };
+
+    const onDeleteKeyDown = (event: KeyboardEvent) => {
+      if (
+        !isEditorEventTarget?.(event.target) ||
+        isTextEntry(event.target) ||
+        (event.key !== 'Backspace' && event.key !== 'Delete') ||
+        !selectedNodeId
+      ) {
+        return;
+      }
+      const selected = nodeIndex.get(selectedNodeId);
+      if (!selected || selected.locked) return;
+      event.preventDefault();
+      if (
+        window.confirm(
+          `Supprimer ${registry.definitions.get(selected.node.type)?.label ?? 'cet élément'} ?`,
+        )
+      ) {
+        deleteNode(selectedNodeId);
+      }
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!isEditorEventTarget?.(event.target)) return;
+      if (event.code === 'Space') setSpaceHeld(false);
+      if (event.key === 'Shift') setShiftHeld(false);
+    };
+    const onWindowBlur = () => {
+      setSpaceHeld(false);
+      setShiftHeld(false);
+      setIsPanning(false);
+      panStartRef.current = null;
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onDeleteKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onDeleteKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
+    };
+  }, [
+    deleteNode,
+    duplicateNode,
+    fitCanvas,
+    isEditorEventTarget,
+    nodeIndex,
+    selectedNodeId,
+    setZoom,
+    zoomBy,
+  ]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const firstItem = contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    firstItem?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (isEditorEventTarget?.(event.target) && event.key === 'Escape') setContextMenu(null);
+    };
+    const closeOnOutsideClick = () => setContextMenu(null);
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('pointerdown', closeOnOutsideClick);
+    };
+  }, [contextMenu, isEditorEventTarget]);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const menu = contextMenuRef.current;
+    if (!contextMenu || !stage || !menu) return;
+
+    const visibleLeft = stage.scrollLeft;
+    const visibleTop = stage.scrollTop;
+    const x = Math.min(
+      Math.max(contextMenu.x, visibleLeft + 8),
+      Math.max(visibleLeft + 8, visibleLeft + stage.clientWidth - menu.offsetWidth - 8),
+    );
+    const y = Math.min(
+      Math.max(contextMenu.y, visibleTop + 8),
+      Math.max(visibleTop + 8, visibleTop + stage.clientHeight - menu.offsetHeight - 8),
+    );
+
+    if (x !== contextMenu.x || y !== contextMenu.y) {
+      setContextMenu({ ...contextMenu, x, y });
+    }
+  }, [contextMenu]);
+
+  const openContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const stage = stageRef.current;
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    const targetNode =
+      event.target instanceof Element ? event.target.closest<HTMLElement>('.editable-node') : null;
+    const nodeId = targetNode?.dataset.nodeId ?? selectedNodeId;
+    if (nodeId && nodeId !== selectedNodeId) selectNode(nodeId);
+    const x = event.clientX - bounds.left + stage.scrollLeft;
+    const y = event.clientY - bounds.top + stage.scrollTop;
+    setContextMenu({ x, y, nodeId });
+  };
+
+  const handleCanvasWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest('button, input, select, textarea, [role="menu"], [role="dialog"]')
+    ) {
+      return;
+    }
+
+    const stage = stageRef.current;
+    const canvas = canvasRef.current?.parentElement;
+    if (!stage || !canvas) return;
+
+    event.preventDefault();
+    const stageBounds = stage.getBoundingClientRect();
+    const canvasBounds = canvas.getBoundingClientRect();
+    const deltaMultiplier =
+      event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? stage.clientHeight
+          : 1;
+    const nextZoom = Math.min(
+      1.5,
+      Math.max(
+        0.25,
+        Math.round(zoom * Math.exp((-event.deltaY * deltaMultiplier) / 500) * 100) / 100,
+      ),
+    );
+    if (nextZoom === zoom) {
+      zoomAnchorRef.current = null;
+      return;
+    }
+
+    zoomAnchorRef.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      canvasX: (event.clientX - canvasBounds.left) / zoom,
+      canvasY: (event.clientY - canvasBounds.top) / zoom,
+      stageX: event.clientX - stageBounds.left + stage.scrollLeft,
+      stageY: event.clientY - stageBounds.top + stage.scrollTop,
+    };
+    setZoom(nextZoom);
+  };
+
+  const beginPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (preview || (event.button !== 0 && event.button !== 1)) return;
+    const isMiddleButton = event.button === 1;
+    if (!isMiddleButton && !spaceHeld && !shiftHeld && activeTool !== 'hand') return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu(null);
+    panStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: stage.scrollLeft,
+      scrollTop: stage.scrollTop,
+    };
+    didPanRef.current = true;
+    setIsPanning(true);
+    stage.setPointerCapture(event.pointerId);
+  };
+
+  const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = panStartRef.current;
+    const stage = stageRef.current;
+    if (!start || !stage) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) didPanRef.current = true;
+    stage.scrollLeft = start.scrollLeft - deltaX;
+    stage.scrollTop = start.scrollTop - deltaY;
+  };
+
+  const endPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!panStartRef.current) return;
+    panStartRef.current = null;
+    setIsPanning(false);
+    if (stageRef.current?.hasPointerCapture(event.pointerId)) {
+      stageRef.current.releasePointerCapture(event.pointerId);
+    }
   };
 
   const renderNode = React.useCallback(
@@ -269,173 +575,320 @@ export const EditorCanvas = React.memo(({ preview = false }: { preview?: boolean
   );
 
   return (
-    <div
-      ref={stageRef}
-      className={`editor-stage${preview ? ' is-preview' : ''}`}
-      onClick={() => selectNode(null)}
-      onDragOverCapture={(event) => {
-        if (preview) return;
-        const isSupportedDrag =
-          event.dataTransfer.types.includes('application/x-dsk-component') ||
-          event.dataTransfer.types.includes('application/x-dsk-node');
-        if (!isSupportedDrag) return;
-        event.preventDefault();
-        const hit = globalThis.document
-          .elementFromPoint(event.clientX, event.clientY)
-          ?.closest<HTMLElement>('.editable-node');
-        const targetId = hit?.dataset.nodeId;
-        const targetEntry = targetId ? nodeIndex.get(targetId) : undefined;
-        if (targetEntry?.locked) {
-          updateDropHint(null);
-          setDropMessage((current) =>
-            current === 'Cette zone est verrouillée.' ? current : 'Cette zone est verrouillée.',
-          );
-          return;
-        }
-        if (hit && targetId && targetEntry) {
-          const nextHint = {
-            id: targetId,
-            ...resolveDropPosition(event.clientX, event.clientY, hit, targetEntry.node.type),
-            element: hit,
-          };
-          updateDropHint(nextHint);
-        } else {
-          updateDropHint(null);
-        }
-        setDropMessage(null);
-      }}
-      onDragLeave={(event) => {
-        if (
-          !(event.relatedTarget instanceof Node) ||
-          !event.currentTarget.contains(event.relatedTarget)
-        ) {
+    <div className="editor-canvas-frame">
+      <div
+        ref={stageRef}
+        className={[
+          'editor-stage',
+          preview ? 'is-preview' : '',
+          spaceHeld || shiftHeld || activeTool === 'hand' ? 'is-space-pan-ready' : '',
+          isPanning ? 'is-panning' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onClick={() => {
+          if (didPanRef.current) {
+            didPanRef.current = false;
+            return;
+          }
+          setContextMenu(null);
+          selectNode(null);
+        }}
+        onContextMenu={preview ? undefined : openContextMenu}
+        onPointerDown={beginPan}
+        onPointerMove={movePan}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        onAuxClick={(event) => {
+          if (event.button === 1) event.preventDefault();
+        }}
+        onWheel={handleCanvasWheel}
+        onDragOverCapture={(event) => {
+          if (preview) return;
+          const isSupportedDrag =
+            event.dataTransfer.types.includes('application/x-dsk-component') ||
+            event.dataTransfer.types.includes('application/x-dsk-node');
+          if (!isSupportedDrag) return;
+          event.preventDefault();
+          const hit = globalThis.document
+            .elementFromPoint(event.clientX, event.clientY)
+            ?.closest<HTMLElement>('.editable-node');
+          const targetId = hit?.dataset.nodeId;
+          const targetEntry = targetId ? nodeIndex.get(targetId) : undefined;
+          if (targetEntry?.locked) {
+            updateDropHint(null);
+            setDropMessage((current) =>
+              current === 'Cette zone est verrouillée.' ? current : 'Cette zone est verrouillée.',
+            );
+            return;
+          }
+          if (hit && targetId && targetEntry) {
+            const nextHint = {
+              id: targetId,
+              ...resolveDropPosition(
+                event.clientX,
+                event.clientY,
+                hit,
+                targetEntry.node.type,
+                registry.definitions,
+              ),
+              element: hit,
+            };
+            updateDropHint(nextHint);
+          } else {
+            updateDropHint(null);
+          }
+          setDropMessage(null);
+        }}
+        onDragLeave={(event) => {
+          if (
+            !(event.relatedTarget instanceof Node) ||
+            !event.currentTarget.contains(event.relatedTarget)
+          ) {
+            updateDropHint(null);
+            setDropMessage(null);
+          }
+        }}
+        onDragEndCapture={() => {
           updateDropHint(null);
           setDropMessage(null);
-        }
-      }}
-      onDropCapture={(event) => {
-        if (preview) return;
-        const componentType = event.dataTransfer.getData('application/x-dsk-component');
-        const movingId = event.dataTransfer.getData('application/x-dsk-node');
-        if (!componentType && !movingId) return;
-        const eventTarget = event.target;
-        if (!(eventTarget instanceof Element)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        setDropMessage(null);
+        }}
+        onDropCapture={(event) => {
+          if (preview) return;
+          const componentType = event.dataTransfer.getData('application/x-dsk-component');
+          const movingId = event.dataTransfer.getData('application/x-dsk-node');
+          if (!componentType && !movingId) return;
+          const eventTarget = event.target;
+          if (!(eventTarget instanceof Element)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDropMessage(null);
 
-        const hitTarget = globalThis.document
-          .elementFromPoint(event.clientX, event.clientY)
-          ?.closest<HTMLElement>('.editable-node');
-        const targetElement = hitTarget ?? eventTarget.closest<HTMLElement>('.editable-node');
-        const currentHint = dropHintRef.current;
-        const targetId =
-          hitTarget?.dataset.nodeId ?? currentHint?.id ?? targetElement?.dataset.nodeId;
-        if (targetId) {
-          const targetNode = targetId ? nodeIndex.get(targetId)?.node : undefined;
-          if (!targetId || !targetNode) {
-            setDropMessage('La cible de dépôt est introuvable dans le document.');
+          const hitTarget = globalThis.document
+            .elementFromPoint(event.clientX, event.clientY)
+            ?.closest<HTMLElement>('.editable-node');
+          const targetElement = hitTarget ?? eventTarget.closest<HTMLElement>('.editable-node');
+          const currentHint = dropHintRef.current;
+          const targetId = hitTarget?.dataset.nodeId ?? targetElement?.dataset.nodeId;
+          if (targetId) {
+            const targetNode = targetId ? nodeIndex.get(targetId)?.node : undefined;
+            if (!targetId || !targetNode) {
+              setDropMessage('La cible de dépôt est introuvable dans le document.');
+            } else {
+              const { position, axis } =
+                currentHint?.id === targetId
+                  ? currentHint
+                  : targetElement
+                    ? resolveDropPosition(
+                        event.clientX,
+                        event.clientY,
+                        targetElement,
+                        targetNode.type,
+                        registry.definitions,
+                      )
+                    : { position: 'after' as const, axis: 'vertical' as const };
+              if (targetElement)
+                updateDropHint({ id: targetId, position, axis, element: targetElement });
+              const accepted = componentType
+                ? addComponentAt(componentType, targetId, position)
+                : moveNode(movingId, targetId, position);
+              if (!accepted) {
+                setDropMessage(
+                  'Placement refusé : vérifiez la hiérarchie et les composants autorisés.',
+                );
+              }
+            }
           } else {
-            const { position, axis } =
-              currentHint?.id === targetId
-                ? currentHint
-                : targetElement
-                  ? resolveDropPosition(
-                      event.clientX,
-                      event.clientY,
-                      targetElement,
-                      targetNode.type,
-                    )
-                  : { position: 'after' as const, axis: 'vertical' as const };
-            if (targetElement)
-              updateDropHint({ id: targetId, position, axis, element: targetElement });
-            const accepted = componentType
-              ? addComponentAt(componentType, targetId, position)
-              : moveNode(movingId, targetId, position);
-            if (!accepted) {
-              setDropMessage(
-                'Placement refusé : vérifiez la hiérarchie et les composants autorisés.',
-              );
+            const onCanvas =
+              eventTarget.closest('.canvas-wrapper') !== null || eventTarget === stageRef.current;
+            if (onCanvas) {
+              const firstSection = document.sections[0];
+              const accepted =
+                componentType && firstSection
+                  ? addComponentToSection(componentType, firstSection.id)
+                  : movingId && firstSection
+                    ? moveNodeToSection(movingId, firstSection.id)
+                    : false;
+              if (!accepted) {
+                setDropMessage('Impossible de placer le composant à la racine de la section.');
+              }
             }
           }
-        } else {
-          const onCanvas =
-            eventTarget.closest('.canvas-wrapper') !== null || eventTarget === stageRef.current;
-          if (onCanvas) {
-            const firstSection = document.sections[0];
-            const accepted =
-              componentType && firstSection
-                ? addComponentToSection(componentType, firstSection.id)
-                : movingId && firstSection
-                  ? moveNodeToSection(movingId, firstSection.id)
-                  : false;
-            if (!accepted) {
-              setDropMessage('Impossible de placer le composant à la racine de la section.');
-            }
-          }
-        }
-        updateDropHint(null);
-      }}
-    >
-      {!preview ? (
-        <div
-          className="canvas-tools"
-          role="toolbar"
-          aria-label="Zoom du canvas"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            aria-label="Zoom arrière"
-            title="Zoom arrière"
-            onClick={() => setZoom(zoom - 0.1)}
-          >
-            −
-          </button>
-          <span aria-live="polite">{Math.round(zoom * 100)}%</span>
-          <button
-            type="button"
-            aria-label="Zoom avant"
-            title="Zoom avant"
-            onClick={() => setZoom(zoom + 0.1)}
-          >
-            +
-          </button>
-          <button type="button" onClick={fitCanvas}>
-            Fit
-          </button>
-          {dropMessage ? (
-            <span className="canvas-drop-message" role="status">
-              {dropMessage}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      <div
-        className="canvas-viewport"
-        style={{ width: widthMap[viewport] * zoom, height: canvasHeight * zoom }}
+          updateDropHint(null);
+        }}
       >
+        {!preview ? (
+          <div
+            className="canvas-tools"
+            role="toolbar"
+            aria-label="Zoom du canvas"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label="Zoom arrière"
+              title="Zoom arrière"
+              onClick={() => setZoom(zoom - 0.1)}
+            >
+              −
+            </button>
+            <span aria-live="polite">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              aria-label="Zoom avant"
+              title="Zoom avant"
+              onClick={() => setZoom(zoom + 0.1)}
+            >
+              +
+            </button>
+            <button type="button" onClick={fitCanvas}>
+              Fit
+            </button>
+            {dropMessage ? (
+              <span className="canvas-drop-message" role="status">
+                {dropMessage}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         <div
-          ref={canvasRef}
-          className="canvas-wrapper"
-          data-editor-viewport={viewport}
-          style={{
-            width: widthMap[viewport],
-            transform: `scale(${zoom})`,
-            transformOrigin: 'top left',
-          }}
+          className="canvas-viewport"
+          style={{ width: widthMap[viewport] * zoom, height: canvasHeight * zoom }}
         >
-          {/* Store ingress and action-specific schemas validate the editor-owned document. */}
-          <MemoizedPageRenderer
-            document={document}
-            registry={defaultRendererRegistry}
-            fallbackComponent={FallbackComponent}
-            validate={false}
-            viewport={viewport}
-            mode={preview ? 'preview' : 'edit'}
-            renderNode={renderNode}
-          />
+          <div
+            ref={canvasRef}
+            className="canvas-wrapper"
+            data-editor-viewport={viewport}
+            style={{
+              width: widthMap[viewport],
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            {/* Store ingress and action-specific schemas validate the editor-owned document. */}
+            <MemoizedPageRenderer
+              document={rendererDocument}
+              registry={registry.renderers}
+              fallbackComponent={FallbackComponent}
+              validate={false}
+              viewport={viewport}
+              mode={preview ? 'preview' : 'edit'}
+              renderNode={renderNode}
+            />
+          </div>
         </div>
+
+        {contextMenu ? (
+          <div
+            ref={contextMenuRef}
+            className="canvas-context-menu"
+            role="menu"
+            aria-label="Options du canvas"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onKeyDown={(event) => {
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const items = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+              );
+              const currentIndex = items.indexOf(
+                globalThis.document.activeElement as HTMLButtonElement,
+              );
+              const nextIndex =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? items.length - 1
+                    : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + items.length) %
+                      items.length;
+              items[nextIndex]?.focus();
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              setContextMenu(null);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <div className="canvas-context-heading">Canvas</div>
+            <button type="button" role="menuitem" onClick={() => zoomBy(-0.1)}>
+              <span>Zoom arrière</span>
+              <kbd>Ctrl −</kbd>
+            </button>
+            <button type="button" role="menuitem" onClick={() => zoomBy(0.1)}>
+              <span>Zoom avant</span>
+              <kbd>Ctrl +</kbd>
+            </button>
+            <button type="button" role="menuitem" onClick={() => setZoom(1)}>
+              <span>Zoom à 100 %</span>
+              <kbd>Ctrl 1</kbd>
+            </button>
+            <button type="button" role="menuitem" onClick={fitCanvas}>
+              <span>Ajuster à la fenêtre</span>
+              <kbd>Ctrl 0</kbd>
+            </button>
+            <div className="canvas-context-divider" />
+            <button type="button" role="menuitem" onClick={() => addComponent('core/container')}>
+              <span>Ajouter un conteneur</span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => addComponent('core/text')}>
+              <span>Ajouter du texte</span>
+              <kbd>T</kbd>
+            </button>
+            <button type="button" role="menuitem" onClick={() => addComponent('core/button')}>
+              <span>Ajouter un bouton</span>
+            </button>
+            {contextMenu.nodeId ? (
+              <>
+                <div className="canvas-context-divider" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => duplicateNode(contextMenu.nodeId!)}
+                >
+                  <span>Dupliquer l’élément</span>
+                  <kbd>Ctrl/⌘ D</kbd>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="is-danger"
+                  onClick={() => {
+                    const node = nodeIndex.get(contextMenu.nodeId!)?.node;
+                    if (
+                      node &&
+                      window.confirm(
+                        `Supprimer ${registry.definitions.get(node.type)?.label ?? 'cet élément'} ?`,
+                      )
+                    ) {
+                      deleteNode(contextMenu.nodeId!);
+                    }
+                  }}
+                >
+                  <span>Supprimer l’élément</span>
+                  <kbd>⌫</kbd>
+                </button>
+              </>
+            ) : null}
+            <div className="canvas-context-divider" />
+            <div className="canvas-context-hints">
+              <span>
+                <kbd>Espace</kbd> ou <kbd>Maj</kbd> + glisser pour déplacer
+              </span>
+              <span>
+                <kbd>H</kbd> main · <kbd>V</kbd> sélection
+              </span>
+            </div>
+            {onTogglePreview ? (
+              <button type="button" role="menuitem" onClick={onTogglePreview}>
+                <span>Aperçu</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Floating Bottom Toolbar (Figma Style) */}
@@ -578,8 +1031,30 @@ export const EditorCanvas = React.memo(({ preview = false }: { preview?: boolean
           >
             <Maximize2 size={13} />
           </button>
+          {onTogglePreview ? (
+            <button
+              type="button"
+              className="figma-floating-tool-btn"
+              title="Aperçu du document"
+              aria-label="Aperçu du document"
+              onClick={onTogglePreview}
+            >
+              <Eye size={14} />
+            </button>
+          ) : null}
         </div>
       )}
+      {preview && onTogglePreview ? (
+        <button
+          type="button"
+          className="canvas-preview-exit"
+          title="Quitter l’aperçu"
+          onClick={onTogglePreview}
+        >
+          <Pencil size={14} />
+          <span>Modifier</span>
+        </button>
+      ) : null}
     </div>
   );
 });

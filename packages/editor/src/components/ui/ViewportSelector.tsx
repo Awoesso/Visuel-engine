@@ -1,9 +1,10 @@
 import React from 'react';
-import { useEditorStore, type ViewportMode } from '../../store';
+import { useEditorStoreInstance } from '../../EditorStoreContext';
+import type { ViewportMode } from '../../store';
 
 export const ViewportSelector: React.FC = () => {
-  const viewport = useEditorStore((s) => s.viewport);
-  const setViewport = useEditorStore((s) => s.setViewport);
+  const viewport = useEditorStoreInstance((s) => s.viewport);
+  const setViewport = useEditorStoreInstance((s) => s.setViewport);
 
   const options: { id: ViewportMode; label: string }[] = [
     { id: 'desktop', label: 'Desktop' },

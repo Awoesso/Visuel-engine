@@ -1,18 +1,13 @@
 import React from 'react';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { ComponentDefinition } from '@dsk/core';
 import type { RenderComponentProps } from '@dsk/react-renderer';
 
 export const HeadingPropsSchema = z.object({
   text: z.string().default('Heading'),
-  level: z.union([
-    z.literal(1),
-    z.literal(2),
-    z.literal(3),
-    z.literal(4),
-    z.literal(5),
-    z.literal(6),
-  ]).default(2),
+  level: z
+    .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)])
+    .default(2),
   color: z.string().optional(),
   textAlign: z.enum(['left', 'center', 'right']).default('left'),
 });
@@ -20,10 +15,7 @@ export const HeadingPropsSchema = z.object({
 export type HeadingProps = z.infer<typeof HeadingPropsSchema>;
 export type HeadingInputProps = z.input<typeof HeadingPropsSchema>;
 
-export const Heading: React.FC<RenderComponentProps<HeadingInputProps>> = ({
-  props,
-  style,
-}) => {
+export const Heading: React.FC<RenderComponentProps<HeadingInputProps>> = ({ props, style }) => {
   const safeProps = HeadingPropsSchema.parse(props || {});
   const Tag = `h${safeProps.level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 

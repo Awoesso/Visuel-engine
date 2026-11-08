@@ -1,4 +1,5 @@
-import React, { useState, useId, useRef } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ElementStyles } from '@dsk/core';
 import {
   Eye,
@@ -44,20 +45,116 @@ const PRESET_GRADIENTS = [
 ];
 
 const PRESET_IMAGES = [
-  { label: 'Texture Abstraite', url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80' },
-  { label: 'Dégradé Sombre', url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&auto=format&fit=crop&q=80' },
-  { label: 'Architecture Minimaliste', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800&auto=format&fit=crop&q=80' },
+  {
+    label: 'Texture Abstraite',
+    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+  },
+  {
+    label: 'Dégradé Sombre',
+    url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&auto=format&fit=crop&q=80',
+  },
+  {
+    label: 'Architecture Minimaliste',
+    url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800&auto=format&fit=crop&q=80',
+  },
 ];
+
+type PopoverPosition = {
+  top: number;
+  left: number;
+  maxHeight: number;
+};
 
 export const FillEditor: React.FC<FillEditorProps> = ({ styles, onChange, disabled = false }) => {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<FillType>('solid');
+  const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
   const [customImageUrl, setCustomImageUrl] = useState('');
   const [gradientAngle, setGradientAngle] = useState('135deg');
   const [gradientColor1, setGradientColor1] = useState('#6366f1');
   const [gradientColor2, setGradientColor2] = useState('#a855f7');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const popoverId = useId();
+
+  useEffect(() => {
+    if (disabled) setPopoverOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    if (!popoverOpen) {
+      setPopoverPosition(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const anchor = sectionRef.current?.getBoundingClientRect();
+      const popover = popoverRef.current;
+      if (!anchor || !popover) return;
+
+      const margin = 12;
+      const gap = 8;
+      const below = window.innerHeight - anchor.bottom - gap - margin;
+      const above = anchor.top - gap - margin;
+      const naturalHeight = Math.min(popover.scrollHeight, 560, window.innerHeight * 0.72);
+      const placeBelow = below >= Math.min(naturalHeight, 260) || below >= above;
+      const maxHeight = Math.max(
+        120,
+        Math.min(window.innerHeight - margin * 2, placeBelow ? below : above),
+      );
+      const height = Math.min(naturalHeight, maxHeight);
+      const width = popover.getBoundingClientRect().width;
+      const left = Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin));
+      const top = placeBelow
+        ? Math.min(anchor.bottom + gap, window.innerHeight - height - margin)
+        : Math.max(margin, anchor.top - gap - height);
+
+      setPopoverPosition((current) =>
+        current?.top === top && current.left === left && current.maxHeight === maxHeight
+          ? current
+          : { top, left, maxHeight },
+      );
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    if (sectionRef.current) resizeObserver?.observe(sectionRef.current);
+    if (popoverRef.current) resizeObserver?.observe(popoverRef.current);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+      resizeObserver?.disconnect();
+    };
+  }, [activeTab, popoverOpen]);
+
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPopoverOpen(false);
+    };
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !sectionRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
+        setPopoverOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', closeOnEscape);
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+    };
+  }, [popoverOpen]);
 
   // Detect current active fill
   const currentBgColor = styles.backgroundColor ?? '';
@@ -167,7 +264,7 @@ export const FillEditor: React.FC<FillEditorProps> = ({ styles, onChange, disabl
   };
 
   return (
-    <div className="figma-fill-section">
+    <div ref={sectionRef} className="figma-fill-section">
       <div className="figma-section-header">
         <span className="figma-section-title">Fill</span>
         <div className="figma-section-actions">
@@ -177,6 +274,8 @@ export const FillEditor: React.FC<FillEditorProps> = ({ styles, onChange, disabl
               className="figma-icon-btn"
               title="Ajouter un remplissage"
               aria-label="Ajouter un remplissage"
+              aria-expanded={popoverOpen}
+              aria-controls={popoverId}
               disabled={disabled}
               onClick={addDefaultFill}
             >
@@ -194,12 +293,12 @@ export const FillEditor: React.FC<FillEditorProps> = ({ styles, onChange, disabl
             className="figma-fill-swatch-btn"
             title="Modifier le remplissage"
             aria-label="Modifier le remplissage"
+            aria-expanded={popoverOpen}
+            aria-controls={popoverId}
             disabled={disabled}
             onClick={() => setPopoverOpen((prev) => !prev)}
             style={{
-              background: currentBgImage
-                ? currentBgImage
-                : currentBgColor || '#FAFAFA',
+              background: currentBgImage ? currentBgImage : currentBgColor || '#FAFAFA',
               backgroundSize: styles.backgroundSize || 'cover',
               backgroundPosition: styles.backgroundPosition || 'center',
             }}
@@ -285,233 +384,255 @@ export const FillEditor: React.FC<FillEditorProps> = ({ styles, onChange, disabl
       )}
 
       {/* Popover de configuration de remplissage Figma */}
-      {popoverOpen && (
-        <div className="figma-fill-popover" id={popoverId} role="dialog" aria-label="Éditeur de remplissage">
-          <div className="figma-fill-tabs">
-            <button
-              type="button"
-              className={`figma-fill-tab ${activeTab === 'solid' ? 'is-active' : ''}`}
-              onClick={() => setActiveTab('solid')}
+      {popoverOpen && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              className="figma-fill-popover"
+              id={popoverId}
+              role="dialog"
+              aria-label="Éditeur de remplissage"
+              style={{
+                top: popoverPosition?.top ?? 12,
+                left: popoverPosition?.left ?? 12,
+                maxHeight: popoverPosition?.maxHeight,
+                visibility: popoverPosition ? 'visible' : 'hidden',
+              }}
             >
-              <Palette size={13} />
-              <span>Couleur</span>
-            </button>
-            <button
-              type="button"
-              className={`figma-fill-tab ${activeTab === 'gradient' ? 'is-active' : ''}`}
-              onClick={() => setActiveTab('gradient')}
-            >
-              <Sparkles size={13} />
-              <span>Dégradé</span>
-            </button>
-            <button
-              type="button"
-              className={`figma-fill-tab ${activeTab === 'image' ? 'is-active' : ''}`}
-              onClick={() => setActiveTab('image')}
-            >
-              <ImageIcon size={13} />
-              <span>Image</span>
-            </button>
-          </div>
-
-          <div className="figma-fill-popover-content">
-            {/* SOLID TAB */}
-            {activeTab === 'solid' && (
-              <div className="figma-solid-picker">
-                <div className="figma-native-picker-row">
-                  <input
-                    type="color"
-                    className="figma-color-circle"
-                    value={currentBgColor && /^#[0-9a-f]{6}$/i.test(currentBgColor) ? currentBgColor : '#ffffff'}
-                    onChange={(e) => handleColorChange(e.target.value)}
-                  />
-                  <div className="figma-color-value-display">
-                    <code>{currentBgColor || '#FFFFFF'}</code>
-                  </div>
+              <fieldset className="figma-fill-popover-controls" disabled={disabled}>
+                <div className="figma-fill-tabs">
+                  <button
+                    type="button"
+                    className={`figma-fill-tab ${activeTab === 'solid' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('solid')}
+                  >
+                    <Palette size={13} />
+                    <span>Couleur</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`figma-fill-tab ${activeTab === 'gradient' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('gradient')}
+                  >
+                    <Sparkles size={13} />
+                    <span>Dégradé</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`figma-fill-tab ${activeTab === 'image' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('image')}
+                  >
+                    <ImageIcon size={13} />
+                    <span>Image</span>
+                  </button>
                 </div>
 
-                <div className="figma-palette-label">Nuancier rapide</div>
-                <div className="figma-palette-grid">
-                  {PRESET_COLORS.map((hex) => (
-                    <button
-                      key={hex}
-                      type="button"
-                      className="figma-palette-swatch"
-                      style={{ backgroundColor: hex }}
-                      title={hex}
-                      onClick={() => handleColorChange(hex)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+                <div className="figma-fill-popover-content">
+                  {/* SOLID TAB */}
+                  {activeTab === 'solid' && (
+                    <div className="figma-solid-picker">
+                      <div className="figma-native-picker-row">
+                        <input
+                          type="color"
+                          className="figma-color-circle"
+                          value={
+                            currentBgColor && /^#[0-9a-f]{6}$/i.test(currentBgColor)
+                              ? currentBgColor
+                              : '#ffffff'
+                          }
+                          onChange={(e) => handleColorChange(e.target.value)}
+                        />
+                        <div className="figma-color-value-display">
+                          <code>{currentBgColor || '#FFFFFF'}</code>
+                        </div>
+                      </div>
 
-            {/* GRADIENT TAB */}
-            {activeTab === 'gradient' && (
-              <div className="figma-gradient-picker">
-                <div className="figma-gradient-preview" style={{ background: currentBgImage || PRESET_GRADIENTS[0] }} />
-
-                <div className="figma-gradient-stops">
-                  <label className="figma-color-stop">
-                    <span>Début</span>
-                    <input
-                      type="color"
-                      value={gradientColor1}
-                      onChange={(e) => {
-                        setGradientColor1(e.target.value);
-                        applyCustomGradient(gradientAngle, e.target.value, gradientColor2);
-                      }}
-                    />
-                  </label>
-                  <label className="figma-color-stop">
-                    <span>Fin</span>
-                    <input
-                      type="color"
-                      value={gradientColor2}
-                      onChange={(e) => {
-                        setGradientColor2(e.target.value);
-                        applyCustomGradient(gradientAngle, gradientColor1, e.target.value);
-                      }}
-                    />
-                  </label>
-                  <label className="figma-color-stop">
-                    <span>Angle</span>
-                    <select
-                      value={gradientAngle}
-                      onChange={(e) => {
-                        setGradientAngle(e.target.value);
-                        applyCustomGradient(e.target.value, gradientColor1, gradientColor2);
-                      }}
-                    >
-                      <option value="90deg">90° (Haut → Bas)</option>
-                      <option value="135deg">135° (Diagonal)</option>
-                      <option value="180deg">180° (Gauche → Droite)</option>
-                      <option value="45deg">45° (Diagonal inversé)</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="figma-palette-label">Dégradés prédéfinis</div>
-                <div className="figma-gradient-presets">
-                  {PRESET_GRADIENTS.map((grad, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className="figma-gradient-preset-btn"
-                      style={{ background: grad }}
-                      title={grad}
-                      onClick={() => applyGradient(grad)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* IMAGE TAB */}
-            {activeTab === 'image' && (
-              <div className="figma-image-picker">
-                {isImageFill && (
-                  <div
-                    className="figma-image-preview"
-                    style={{
-                      backgroundImage: currentBgImage,
-                      backgroundSize: styles.backgroundSize || 'cover',
-                      backgroundPosition: styles.backgroundPosition || 'center',
-                    }}
-                  />
-                )}
-
-                <div className="figma-image-controls">
-                  <div className="figma-control-row">
-                    <span className="figma-control-label">Ajustement</span>
-                    <select
-                      className="figma-select"
-                      value={styles.backgroundSize || 'cover'}
-                      onChange={(e) =>
-                        onChange({ backgroundSize: e.target.value })
-                      }
-                    >
-                      <option value="cover">Cover (Remplir)</option>
-                      <option value="contain">Contain (Ajuster)</option>
-                      <option value="100% 100%">Fill (Étirer)</option>
-                      <option value="auto">Taille réelle</option>
-                    </select>
-                  </div>
-
-                  <div className="figma-upload-btn-wrap">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={handleFileUpload}
-                    />
-                    <button
-                      type="button"
-                      className="figma-action-button"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Upload size={13} />
-                      <span>Importer une image</span>
-                    </button>
-                  </div>
-
-                  <div className="figma-url-input-wrap">
-                    <div className="figma-url-field">
-                      <LinkIcon size={12} />
-                      <input
-                        type="url"
-                        placeholder="https://... URL de l'image"
-                        value={customImageUrl}
-                        onChange={(e) => setCustomImageUrl(e.target.value)}
-                      />
+                      <div className="figma-palette-label">Nuancier rapide</div>
+                      <div className="figma-palette-grid">
+                        {PRESET_COLORS.map((hex) => (
+                          <button
+                            key={hex}
+                            type="button"
+                            className="figma-palette-swatch"
+                            style={{ backgroundColor: hex }}
+                            title={hex}
+                            onClick={() => handleColorChange(hex)}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      className="figma-apply-btn"
-                      disabled={!customImageUrl.trim()}
-                      onClick={() => {
-                        if (customImageUrl.trim()) {
-                          applyImage(customImageUrl.trim());
-                          setCustomImageUrl('');
-                        }
-                      }}
-                    >
-                      OK
-                    </button>
-                  </div>
+                  )}
 
-                  <div className="figma-palette-label">Galerie d’inspiration</div>
-                  <div className="figma-image-presets">
-                    {PRESET_IMAGES.map((img, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className="figma-image-preset-item"
-                        title={img.label}
-                        onClick={() => applyImage(img.url)}
-                      >
-                        <img src={img.url} alt={img.label} loading="lazy" />
-                        <span>{img.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                  {/* GRADIENT TAB */}
+                  {activeTab === 'gradient' && (
+                    <div className="figma-gradient-picker">
+                      <div
+                        className="figma-gradient-preview"
+                        style={{ background: currentBgImage || PRESET_GRADIENTS[0] }}
+                      />
+
+                      <div className="figma-gradient-stops">
+                        <label className="figma-color-stop">
+                          <span>Début</span>
+                          <input
+                            type="color"
+                            value={gradientColor1}
+                            onChange={(e) => {
+                              setGradientColor1(e.target.value);
+                              applyCustomGradient(gradientAngle, e.target.value, gradientColor2);
+                            }}
+                          />
+                        </label>
+                        <label className="figma-color-stop">
+                          <span>Fin</span>
+                          <input
+                            type="color"
+                            value={gradientColor2}
+                            onChange={(e) => {
+                              setGradientColor2(e.target.value);
+                              applyCustomGradient(gradientAngle, gradientColor1, e.target.value);
+                            }}
+                          />
+                        </label>
+                        <label className="figma-color-stop">
+                          <span>Angle</span>
+                          <select
+                            value={gradientAngle}
+                            onChange={(e) => {
+                              setGradientAngle(e.target.value);
+                              applyCustomGradient(e.target.value, gradientColor1, gradientColor2);
+                            }}
+                          >
+                            <option value="90deg">90° (Haut → Bas)</option>
+                            <option value="135deg">135° (Diagonal)</option>
+                            <option value="180deg">180° (Gauche → Droite)</option>
+                            <option value="45deg">45° (Diagonal inversé)</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="figma-palette-label">Dégradés prédéfinis</div>
+                      <div className="figma-gradient-presets">
+                        {PRESET_GRADIENTS.map((grad, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            className="figma-gradient-preset-btn"
+                            style={{ background: grad }}
+                            title={grad}
+                            onClick={() => applyGradient(grad)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* IMAGE TAB */}
+                  {activeTab === 'image' && (
+                    <div className="figma-image-picker">
+                      {isImageFill && (
+                        <div
+                          className="figma-image-preview"
+                          style={{
+                            backgroundImage: currentBgImage,
+                            backgroundSize: styles.backgroundSize || 'cover',
+                            backgroundPosition: styles.backgroundPosition || 'center',
+                          }}
+                        />
+                      )}
+
+                      <div className="figma-image-controls">
+                        <div className="figma-control-row">
+                          <span className="figma-control-label">Ajustement</span>
+                          <select
+                            className="figma-select"
+                            value={styles.backgroundSize || 'cover'}
+                            onChange={(e) => onChange({ backgroundSize: e.target.value })}
+                          >
+                            <option value="cover">Cover (Remplir)</option>
+                            <option value="contain">Contain (Ajuster)</option>
+                            <option value="100% 100%">Fill (Étirer)</option>
+                            <option value="auto">Taille réelle</option>
+                          </select>
+                        </div>
+
+                        <div className="figma-upload-btn-wrap">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={handleFileUpload}
+                          />
+                          <button
+                            type="button"
+                            className="figma-action-button"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <Upload size={13} />
+                            <span>Importer une image</span>
+                          </button>
+                        </div>
+
+                        <div className="figma-url-input-wrap">
+                          <div className="figma-url-field">
+                            <LinkIcon size={12} />
+                            <input
+                              type="url"
+                              placeholder="https://... URL de l'image"
+                              value={customImageUrl}
+                              onChange={(e) => setCustomImageUrl(e.target.value)}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            className="figma-apply-btn"
+                            disabled={!customImageUrl.trim()}
+                            onClick={() => {
+                              if (customImageUrl.trim()) {
+                                applyImage(customImageUrl.trim());
+                                setCustomImageUrl('');
+                              }
+                            }}
+                          >
+                            OK
+                          </button>
+                        </div>
+
+                        <div className="figma-palette-label">Galerie d’inspiration</div>
+                        <div className="figma-image-presets">
+                          {PRESET_IMAGES.map((img, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              className="figma-image-preset-item"
+                              title={img.label}
+                              onClick={() => applyImage(img.url)}
+                            >
+                              <img src={img.url} alt={img.label} loading="lazy" />
+                              <span>{img.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
-          </div>
 
-          <div className="figma-fill-popover-footer">
-            <button
-              type="button"
-              className="figma-popover-close-btn"
-              onClick={() => setPopoverOpen(false)}
-            >
-              Fermer
-            </button>
-          </div>
-        </div>
-      )}
+                <div className="figma-fill-popover-footer">
+                  <button
+                    type="button"
+                    className="figma-popover-close-btn"
+                    onClick={() => setPopoverOpen(false)}
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </fieldset>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 };

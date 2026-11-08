@@ -1,9 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { themeToCssVariables } from '@dsk/core';
 import { EditorCanvas } from './components/EditorCanvas';
 import { ComponentSidebar } from './components/ComponentSidebar';
 import { PropertyPanel } from './components/PropertyPanel';
-import { useEditorStore } from './store';
+import {
+  EditorConfigurationProvider,
+  EditorStoreProvider,
+  useEditorConfiguration,
+  useEditorStoreApi,
+  useEditorStoreInstance,
+} from './EditorStoreContext';
+import { DEFAULT_EDITOR_OPTIONS, resolveEditorTheme } from './config';
+import type { EditorAppProps, EditorCallbacks } from './config';
+import { createDefaultComponentRegistry, defaultEditorRegistry } from './constants';
+import { createEditorStore, initialDocument } from './store';
 import { DocumentAutosave, restoreDocument, scheduleDocumentChange } from './persistence';
+import type { SaveState } from './persistence';
 import {
   Undo2,
   Redo2,
@@ -15,7 +27,6 @@ import {
   MoreHorizontal,
   Layers,
   Boxes,
-  Image as ImageIcon,
   HelpCircle,
   PanelLeftClose,
   PanelLeft,
@@ -86,21 +97,28 @@ const PanelResizeHandle = React.memo(
   },
 );
 
-export const EditorApp: React.FC = () => {
+const EMPTY_CALLBACKS: EditorCallbacks = {};
+
+const EditorWorkspace: React.FC = () => {
+  const { registry, theme, options, callbacks } = useEditorConfiguration();
+  const store = useEditorStoreApi();
+  const callbacksRef = useRef(callbacks);
+  callbacksRef.current = callbacks;
   const autosaveRef = useRef<DocumentAutosave | null>(null);
-  const document = useEditorStore((state) => state.document);
-  const viewport = useEditorStore((state) => state.viewport);
-  const saveState = useEditorStore((state) => state.saveState);
-  const setViewport = useEditorStore((state) => state.setViewport);
-  const setSaveState = useEditorStore((state) => state.setSaveState);
-  const resetDemo = useEditorStore((state) => state.resetDemo);
-  const undo = useEditorStore((state) => state.undo);
-  const redo = useEditorStore((state) => state.redo);
-  const canUndo = useEditorStore((state) => state.pastDocuments.length > 0);
-  const canRedo = useEditorStore((state) => state.futureDocuments.length > 0);
-  const updateDocumentTitle = useEditorStore((state) => state.updateDocumentTitle);
+  const editorRootRef = useRef<HTMLDivElement>(null);
+  const document = useEditorStoreInstance((state) => state.document);
+  const viewport = useEditorStoreInstance((state) => state.viewport);
+  const saveState = useEditorStoreInstance((state) => state.saveState);
+  const setViewport = useEditorStoreInstance((state) => state.setViewport);
+  const setSaveState = useEditorStoreInstance((state) => state.setSaveState);
+  const resetDemo = useEditorStoreInstance((state) => state.resetDemo);
+  const undo = useEditorStoreInstance((state) => state.undo);
+  const redo = useEditorStoreInstance((state) => state.redo);
+  const canUndo = useEditorStoreInstance((state) => state.pastDocuments.length > 0);
+  const canRedo = useEditorStoreInstance((state) => state.futureDocuments.length > 0);
+  const updateDocumentTitle = useEditorStoreInstance((state) => state.updateDocumentTitle);
   const [previewMode, setPreviewMode] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(252);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
   const [inspectorWidth, setInspectorWidth] = useState(300);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -114,14 +132,33 @@ export const EditorApp: React.FC = () => {
     () => setInspectorCollapsed((current) => !current),
     [],
   );
+  const isEditorEventTarget = useCallback(
+    (target: EventTarget | null) =>
+      target instanceof Node && editorRootRef.current?.contains(target) === true,
+    [],
+  );
+
+  const reportSaveState = useCallback(
+    (nextSaveState: SaveState) => {
+      setSaveState(nextSaveState);
+      if (nextSaveState.status === 'saved' && nextSaveState.lastSavedAt) {
+        callbacksRef.current.onSave?.(store.getState().document, nextSaveState.lastSavedAt);
+      }
+    },
+    [setSaveState, store],
+  );
 
   useEffect(() => {
-    const autosave = new DocumentAutosave(() => window.localStorage, setSaveState);
+    store.getState().setComponentRegistry(registry.definitions);
+  }, [registry.definitions, store]);
+
+  useEffect(() => {
+    const autosave = new DocumentAutosave(() => window.localStorage, reportSaveState);
     autosaveRef.current = autosave;
     const restored = restoreDocument(() => window.localStorage);
 
     if (restored.status === 'restored') {
-      useEditorStore.getState().replaceDocument(restored.document);
+      store.getState().replaceDocument(restored.document);
       autosave.setLastSavedAt(restored.lastSavedAt);
       if (restored.needsRewrite) {
         autosave.saveNow(restored.document);
@@ -138,11 +175,17 @@ export const EditorApp: React.FC = () => {
       setSaveState({ status: 'idle', lastSavedAt: null, error: null });
     }
 
-    const unsubscribe = useEditorStore.subscribe((state, previousState) => {
+    const unsubscribe = store.subscribe((state, previousState) => {
       scheduleDocumentChange(state, previousState, autosave);
+      if (state.document !== previousState.document) {
+        callbacksRef.current.onChange?.(state.document);
+      }
+      if (state.selectedNodeId !== previousState.selectedNodeId) {
+        callbacksRef.current.onSelectionChange?.(state.selectedNodeId);
+      }
     });
     const flushPendingSave = () => {
-      autosave.flushIfPending(useEditorStore.getState().document);
+      autosave.flushIfPending(store.getState().document);
     };
     window.addEventListener('pagehide', flushPendingSave);
 
@@ -152,11 +195,12 @@ export const EditorApp: React.FC = () => {
       autosave.dispose();
       autosaveRef.current = null;
     };
-  }, [setSaveState]);
+  }, [reportSaveState, store]);
 
   useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
       const target = event.target;
+      if (!isEditorEventTarget(target)) return;
       if (
         target instanceof HTMLElement &&
         (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
@@ -175,7 +219,7 @@ export const EditorApp: React.FC = () => {
     };
     window.addEventListener('keydown', handleHistoryShortcut);
     return () => window.removeEventListener('keydown', handleHistoryShortcut);
-  }, [redo, undo]);
+  }, [isEditorEventTarget, redo, undo]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
@@ -208,12 +252,36 @@ export const EditorApp: React.FC = () => {
     : compactLayout
       ? 'minmax(0, 1fr)'
       : [
-          sidebarCollapsed ? '44px' : `${sidebarWidth}px`,
-          ...(sidebarCollapsed ? [] : ['6px']),
+          ...(options.showSidebar
+            ? [
+                sidebarCollapsed ? '44px' : `${sidebarWidth}px`,
+                ...(sidebarCollapsed ? [] : ['6px']),
+              ]
+            : []),
           'minmax(0, 1fr)',
-          ...(inspectorCollapsed ? [] : ['6px']),
-          inspectorCollapsed ? '44px' : `${inspectorWidth}px`,
+          ...(options.showInspector
+            ? [
+                ...(inspectorCollapsed ? [] : ['6px']),
+                inspectorCollapsed ? '44px' : `${inspectorWidth}px`,
+              ]
+            : []),
         ].join(' ');
+
+  const editorTheme = useMemo(
+    () => resolveEditorTheme(document.theme, theme),
+    [document.theme, theme],
+  );
+  const editorStyle = useMemo(
+    () =>
+      ({
+        ...themeToCssVariables(editorTheme),
+        '--dsk-font-family': "'Geist'",
+        '--dsk-panel-background': editorTheme.colors.surface,
+        '--dsk-workspace-background': editorTheme.colors.background,
+        fontFamily: "'Geist', Arial, sans-serif",
+      }) as React.CSSProperties,
+    [editorTheme],
+  );
 
   const saveStatusLabel = {
     idle: 'Not saved',
@@ -231,7 +299,11 @@ export const EditorApp: React.FC = () => {
         });
 
   return (
-    <div className={`editor-root${previewMode ? ' preview-mode' : ''}`}>
+    <div
+      ref={editorRootRef}
+      className={`editor-root${previewMode ? ' preview-mode' : ''}`}
+      style={editorStyle}
+    >
       <header className="editor-toolbar">
         <div className="editor-brand">
           <span className="editor-brand-mark" aria-hidden="true">
@@ -351,27 +423,31 @@ export const EditorApp: React.FC = () => {
               <time dateTime={saveState.lastSavedAt ?? undefined}>à {lastSavedLabel}</time>
             ) : null}
           </div>
-          <button
-            className="toolbar-button toolbar-button-primary"
-            type="button"
-            title="Enregistrer maintenant"
-            onClick={() => {
-              autosaveRef.current?.saveNow(useEditorStore.getState().document);
-            }}
-          >
-            <Save size={13} />
-            <span>Enregistrer</span>
-          </button>
-          <button
-            className={`toolbar-button${previewMode ? ' toolbar-button-primary' : ''}`}
-            type="button"
-            aria-pressed={previewMode}
-            title="Aperçu du document"
-            onClick={() => setPreviewMode((current) => !current)}
-          >
-            {previewMode ? <Play size={13} /> : <Eye size={13} />}
-            <span>{previewMode ? 'Quitter' : 'Aperçu'}</span>
-          </button>
+          {options.showSaveButton ? (
+            <button
+              className="toolbar-button toolbar-button-primary"
+              type="button"
+              title="Enregistrer maintenant"
+              onClick={() => {
+                autosaveRef.current?.saveNow(store.getState().document);
+              }}
+            >
+              <Save size={13} />
+              <span>Enregistrer</span>
+            </button>
+          ) : null}
+          {options.showPreviewButton ? (
+            <button
+              className={`toolbar-button${previewMode ? ' toolbar-button-primary' : ''}`}
+              type="button"
+              aria-pressed={previewMode}
+              title="Aperçu du document"
+              onClick={() => setPreviewMode((current) => !current)}
+            >
+              {previewMode ? <Play size={13} /> : <Eye size={13} />}
+              <span>{previewMode ? 'Quitter' : 'Aperçu'}</span>
+            </button>
+          ) : null}
           <button
             className="figma-share-pill-btn"
             type="button"
@@ -407,7 +483,7 @@ export const EditorApp: React.FC = () => {
       </header>
       <div className="figma-app-body">
         {/* Leftmost Vertical Navigation Rail (Figma Style) */}
-        {!previewMode && (
+        {!previewMode && options.showSidebar && (
           <nav className="figma-left-rail" aria-label="Navigation principale">
             <div className="figma-rail-top">
               <button
@@ -430,17 +506,6 @@ export const EditorApp: React.FC = () => {
               >
                 <Boxes size={17} />
               </button>
-              <button
-                type="button"
-                className="figma-rail-btn"
-                title="Ressources & Images (Alt+3)"
-                aria-label="Ressources"
-                onClick={() => {
-                  if (sidebarCollapsed) toggleSidebarCollapsed();
-                }}
-              >
-                <ImageIcon size={17} />
-              </button>
             </div>
             <div className="figma-rail-bottom">
               <button
@@ -457,7 +522,11 @@ export const EditorApp: React.FC = () => {
                 className="figma-rail-btn"
                 title="Aide & Raccourcis"
                 aria-label="Aide"
-                onClick={() => alert('DSK Visual Engine - Raccourcis :\n• Ctrl+Z : Annuler\n• Ctrl+Shift+Z : Rétablir\n• Double-clic sur calque : Renommer')}
+                onClick={() =>
+                  alert(
+                    'DSK Visual Engine - Raccourcis :\n• Ctrl+Z : Annuler\n• Ctrl+Shift+Z : Rétablir\n• Double-clic sur calque : Renommer',
+                  )
+                }
               >
                 <HelpCircle size={16} />
               </button>
@@ -468,47 +537,103 @@ export const EditorApp: React.FC = () => {
           className={`editor-workspace${compactLayout ? ' is-compact' : ''}`}
           style={{ gridTemplateColumns: workspaceColumns }}
         >
-        {!previewMode ? (
-          <ComponentSidebar
-            collapsed={sidebarCollapsed}
-            onToggleCollapsed={toggleSidebarCollapsed}
-            onRenameDocument={beginRenameDocument}
+          {!previewMode && options.showSidebar ? (
+            <ComponentSidebar
+              collapsed={sidebarCollapsed}
+              onToggleCollapsed={toggleSidebarCollapsed}
+              onRenameDocument={beginRenameDocument}
+            />
+          ) : null}
+          {!previewMode && options.showSidebar && !compactLayout && !sidebarCollapsed ? (
+            <PanelResizeHandle
+              label="Redimensionner le panneau de gauche"
+              value={sidebarWidth}
+              min={240}
+              max={570}
+              growDirection="left"
+              onResize={setSidebarWidth}
+            />
+          ) : null}
+          <EditorCanvas
+            preview={previewMode}
+            onTogglePreview={() => setPreviewMode((value) => !value)}
+            isEditorEventTarget={isEditorEventTarget}
           />
-        ) : null}
-        {!previewMode && !compactLayout && !sidebarCollapsed ? (
-          <PanelResizeHandle
-            label="Redimensionner le panneau de gauche"
-            value={sidebarWidth}
-            min={190}
-            max={380}
-            growDirection="left"
-            onResize={setSidebarWidth}
-          />
-        ) : null}
-        <EditorCanvas preview={previewMode} />
-        {!previewMode && !compactLayout && !inspectorCollapsed ? (
-          <PanelResizeHandle
-            label="Redimensionner l’inspecteur"
-            value={inspectorWidth}
-            min={230}
-            max={440}
-            growDirection="right"
-            onResize={setInspectorWidth}
-          />
-        ) : null}
-        {!previewMode ? (
-          <PropertyPanel
-            collapsed={inspectorCollapsed}
-            onToggleCollapsed={toggleInspectorCollapsed}
-          />
-        ) : null}
+          {!previewMode && options.showInspector && !compactLayout && !inspectorCollapsed ? (
+            <PanelResizeHandle
+              label="Redimensionner l’inspecteur"
+              value={inspectorWidth}
+              min={300}
+              max={670}
+              growDirection="right"
+              onResize={setInspectorWidth}
+            />
+          ) : null}
+          {!previewMode && options.showInspector ? (
+            <PropertyPanel
+              collapsed={inspectorCollapsed}
+              onToggleCollapsed={toggleInspectorCollapsed}
+            />
+          ) : null}
         </div>
       </div>
     </div>
   );
 };
 
-export { initialDocument, useEditorStore } from './store';
+export const EditorApp: React.FC<EditorAppProps> = ({
+  initialDocument: initialDocumentProp,
+  registry: registryProp,
+  theme,
+  options: optionsProp,
+  callbacks = EMPTY_CALLBACKS,
+  store: externalStore,
+}) => {
+  const [instanceDefaultRegistry] = useState(() => ({
+    definitions: createDefaultComponentRegistry(),
+    renderers: defaultEditorRegistry.renderers,
+  }));
+  const registry = registryProp ?? instanceDefaultRegistry;
+  const [internalStore] = useState(() =>
+    createEditorStore({
+      document: initialDocumentProp ?? initialDocument,
+      registry: registry.definitions,
+    }),
+  );
+  const store = externalStore ?? internalStore;
+  const options = useMemo(
+    () => ({ ...DEFAULT_EDITOR_OPTIONS, ...optionsProp }),
+    [
+      optionsProp?.showSidebar,
+      optionsProp?.showInspector,
+      optionsProp?.showSaveButton,
+      optionsProp?.showPreviewButton,
+    ],
+  );
+  const configuration = useMemo(
+    () => ({ registry, theme, options, callbacks }),
+    [registry, theme, options, callbacks],
+  );
+
+  return (
+    <EditorStoreProvider store={store}>
+      <EditorConfigurationProvider configuration={configuration}>
+        <EditorWorkspace />
+      </EditorConfigurationProvider>
+    </EditorStoreProvider>
+  );
+};
+
+export type {
+  EditorAppProps,
+  EditorCallbacks,
+  EditorOptions,
+  EditorRegistry,
+  EditorTheme,
+} from './config';
+export { createDefaultComponentRegistry, defaultEditorRegistry } from './constants';
+export { createEditorStore, initialDocument, useEditorStore } from './store';
+export type { EditorStoreApi, EditorStoreOptions } from './store';
 export {
   AUTOSAVE_DEBOUNCE_MS,
   DocumentAutosave,

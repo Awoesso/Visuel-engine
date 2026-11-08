@@ -29,9 +29,7 @@ export function resolveResponsiveStyles(
  * Transforms an ElementStyles configuration into safe React.CSSProperties.
  * Prevents arbitrary code execution and restricts keys to standard CSS properties.
  */
-export function elementStylesToCssProperties(
-  styles?: ElementStyles,
-): React.CSSProperties {
+export function elementStylesToCssProperties(styles?: ElementStyles): React.CSSProperties {
   if (!styles) return {};
 
   const css: React.CSSProperties = {};

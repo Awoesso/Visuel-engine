@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { MAX_DOCUMENT_SIZE } from '../constants';
 import { isSafeUrl, sanitizePropsUrls, SECURITY_LIMITS } from '../validation/security';
 import { validatePageDocument } from '../validation/validate';
 import { CURRENT_SCHEMA_VERSION } from '../schemas/document';
@@ -18,8 +19,9 @@ describe('Security Limits & URL Validation', () => {
     expect(isSafeUrl('#section-features')).toBe(true);
     expect(isSafeUrl('mailto:support@example.com')).toBe(true);
     expect(isSafeUrl('tel:+1234567890')).toBe(true);
-    expect(isSafeUrl('data:image/png;base64,iVBORw0KGgo...')).toBe(true);
-    expect(isSafeUrl('data:image/svg+xml;utf8,<svg></svg>')).toBe(true);
+    expect(isSafeUrl('data:image/png;base64,iVBORw0KGgo...', { allowDataImages: true })).toBe(true);
+    expect(isSafeUrl('data:image/svg+xml;utf8,<svg></svg>', { allowDataImages: true })).toBe(false);
+    expect(isSafeUrl('data:image/png;base64,abc123')).toBe(false);
     expect(isSafeUrl('')).toBe(true);
     expect(isSafeUrl(undefined)).toBe(true);
     expect(isSafeUrl(null)).toBe(true);
@@ -36,8 +38,34 @@ describe('Security Limits & URL Validation', () => {
     expect(isSafeUrl('file:///etc/passwd')).toBe(false);
     expect(isSafeUrl('blob:https://example.com/uuid')).toBe(false);
     expect(isSafeUrl('//evil.com/phishing')).toBe(false);
+    expect(isSafeUrl('/\\evil.com')).toBe(false);
+    expect(isSafeUrl('\\evil.com')).toBe(false);
+    expect(isSafeUrl('/%5cevil.com')).toBe(false);
+    expect(isSafeUrl('/%2f%2fevil.com')).toBe(false);
+    expect(isSafeUrl('https://example.com/%00evil')).toBe(false);
+    expect(isSafeUrl('https://user:pass@example.com/')).toBe(false);
     expect(isSafeUrl('jav&#x61;script:alert(1)')).toBe(false);
     expect(isSafeUrl('https://example.com\0evil')).toBe(false);
+  });
+
+  it('should reject backslash URL forms that browsers can normalize externally', () => {
+    const ambiguousUrls = [
+      '\\evil.com',
+      '\\\\evil.com',
+      '/\\evil.com',
+      '/\\\\evil.com',
+      'https:\\\\evil.com',
+      'https:/\\evil.com',
+      '/%5cevil.com',
+      '/%5c%5cevil.com',
+      '/%2f%5cevil.com',
+    ];
+
+    for (const url of ambiguousUrls) {
+      expect(isSafeUrl(url), url).toBe(false);
+    }
+
+    expect(sanitizePropsUrls({ href: '/\\\\evil.com' }).href).toBe('#');
   });
 
   it('should sanitize unsafe URLs in props objects, arrays and nested structures', () => {
@@ -47,11 +75,7 @@ describe('Security Limits & URL Validation', () => {
       imageUrl: 'https://images.unsplash.com/photo',
       safeDataUrl: 'data:image/png;base64,abc123',
       unsafeDataUrl: 'data:text/html;base64,bad',
-      galleryUrls: [
-        'https://example.com/1.jpg',
-        'javascript:alert("xss")',
-        '/local/2.jpg',
-      ],
+      galleryUrls: ['https://example.com/1.jpg', 'javascript:alert("xss")', '/local/2.jpg'],
       actions: [
         { label: 'Action 1', link: 'javascript:evil()' },
         { label: 'Action 2', link: 'https://example.com/ok' },
@@ -65,7 +89,7 @@ describe('Security Limits & URL Validation', () => {
       },
     };
 
-    const sanitized = sanitizePropsUrls(rawProps);
+    const sanitized = sanitizePropsUrls(rawProps, { allowDataImages: true });
     expect(sanitized.targetUrl).toBe('#');
     expect(sanitized.imageUrl).toBe('https://images.unsplash.com/photo');
     expect(sanitized.safeDataUrl).toBe('data:image/png;base64,abc123');
@@ -124,7 +148,9 @@ describe('Security Limits & URL Validation', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.errors.some((e) => e.message.includes('Tree depth'))).toBe(true);
-      expect(result.errors.some((e) => e.message.includes('exceeds maximum limit of 20'))).toBe(true);
+      expect(result.errors.some((e) => e.message.includes('exceeds maximum limit of 20'))).toBe(
+        true,
+      );
     }
   });
 
@@ -190,7 +216,9 @@ describe('Security Limits & URL Validation', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.errors.some((e) => e.message.includes('Total node count'))).toBe(true);
-      expect(result.errors.some((e) => e.message.includes('exceeds maximum limit of 500'))).toBe(true);
+      expect(result.errors.some((e) => e.message.includes('exceeds maximum limit of 500'))).toBe(
+        true,
+      );
     }
   });
 
@@ -232,5 +260,25 @@ describe('Security Limits & URL Validation', () => {
 
     const result = validatePageDocument(realisticDoc);
     expect(result.success).toBe(true);
+  });
+
+  it('should enforce the shared 5 MiB document size limit', () => {
+    expect(MAX_DOCUMENT_SIZE).toBe(5 * 1024 * 1024);
+    expect(SECURITY_LIMITS.MAX_DOCUMENT_SIZE_BYTES).toBe(MAX_DOCUMENT_SIZE);
+
+    const oversizedDoc = {
+      id: 'doc-overflow-size',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      sections: [],
+      payload: 'x'.repeat(MAX_DOCUMENT_SIZE),
+    };
+
+    const result = validatePageDocument(oversizedDoc);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errors.some((error) => error.message.includes('exceeds maximum limit'))).toBe(
+        true,
+      );
+    }
   });
 });

@@ -1,7 +1,7 @@
 import dynamic from 'next/dynamic';
 import React from 'react';
 
-const EditorApp = dynamic(() => import('@dsk/editor').then(m => m.EditorApp), {
+const EditorApp = dynamic(() => import('@dsk/editor').then((m) => m.EditorApp), {
   ssr: false,
 });
 

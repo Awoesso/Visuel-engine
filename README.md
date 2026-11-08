@@ -120,7 +120,59 @@ template-engine/
 - `templates`: contains predefined templates, layouts, and theme presets.
 - `apps/playground`: provides a development environment for testing the engine.
 
-## 6. Design Principles
+## 6. Editor Integration
+
+`EditorApp` can be mounted without configuration for the built-in demonstration experience:
+
+```tsx
+import { EditorApp } from '@dsk/editor';
+
+export function PageBuilder() {
+  return <EditorApp />;
+}
+```
+
+Each mounted editor creates its own Zustand store. `initialDocument` seeds that store on its first
+mount; changing the prop later does not replace edited content. Theme, registry, options, and
+callbacks can be changed without recreating the store. A supplied `store` takes precedence over
+`initialDocument`. The legacy `useEditorStore` export remains available for existing integrations.
+
+The registry pairs Core component definitions used by editing actions with React implementations
+used by the canvas. Start from the built-in definitions and replace or extend them for an
+application-specific library:
+
+```tsx
+import { EditorApp, createDefaultComponentRegistry } from '@dsk/editor';
+import { defaultRendererRegistry } from '@dsk/components';
+import type { ComponentMapping } from '@dsk/react-renderer';
+
+const definitions = createDefaultComponentRegistry();
+const heading = definitions.get('core/heading');
+if (heading) definitions.set('core/heading', { ...heading, label: 'Apex heading' });
+
+const registry = {
+  definitions,
+  renderers: defaultRendererRegistry satisfies ComponentMapping,
+};
+
+export function ApexPageBuilder() {
+  return (
+    <EditorApp
+      registry={registry}
+      theme={{ colors: { primary: '#176b5b' } }}
+      options={{ showInspector: true, showSidebar: true }}
+      callbacks={{ onChange: (document) => console.log(document.metadata.title) }}
+    />
+  );
+}
+```
+
+Theme tokens are partial overrides of the active document theme; defaults come from Core and the
+editor keeps Geist as its interface font. `onChange` reports active-document edits,
+`onSelectionChange` reports selection changes, and `onSave` runs after an editor save succeeds.
+Options currently control visibility of the sidebar, inspector, save button, and preview button.
+
+## 7. Design Principles
 
 - **Modularity:** keep responsibilities separated.
 - **Reusability:** make the engine usable in different SaaS products.
@@ -131,7 +183,7 @@ template-engine/
 - **Compatibility:** version templates, components, and page documents.
 - **Separation of concerns:** keep storefront presentation separate from business logic.
 
-## 7. Data and Security
+## 8. Data and Security
 
 Pages will be represented by validated, serializable configuration documents rather than arbitrary executable code.
 
@@ -148,7 +200,7 @@ The integrating SaaS remains responsible for:
 
 The engine will provide controlled interfaces for accessing the data and actions exposed by the SaaS.
 
-## 8. Development Roadmap
+## 9. Development Roadmap
 
 ### Phase 1 — Foundation
 
@@ -191,7 +243,7 @@ The engine will provide controlled interfaces for accessing the data and actions
 - Configure versioning and release workflows.
 - Publish stable packages when the project is ready.
 
-## 9. Documentation
+## 10. Documentation
 
 Additional technical documentation will be maintained in the `docs/` directory.
 
@@ -207,12 +259,16 @@ Additional technical documentation will be maintained in the `docs/` directory.
 - `docs/VERSIONING.md`: compatibility and migrations.
 - `docs/DECISIONS.md`: significant technical decisions.
 
-## 10. Project Status
+## 11. Project Status
 
 **Status:** Active MVP development.
 
 The repository includes the core document model, React renderer, nine standard
-components, three reusable section presets, and an initial visual editor. The Playground editor stores its
+components, and ten reusable section presets for headers, hero banners, feature
+and product grids, testimonials, FAQs, newsletters, calls to action, and footers.
+Add these blocks from the editor's Sections library, then edit their nested
+components and responsive styles. Decorative product artwork is a placeholder;
+the editor does not yet include an uploaded-asset library. The Playground editor stores its
 current document in browser `localStorage` with debounced autosave and restore.
 This is local draft persistence only; it is not a substitute for host-app
 storage, publishing, or cross-device synchronization. The editor now also
@@ -224,6 +280,6 @@ package. The editor remains an MVP: persistence is browser-local, drag-and-drop
 is limited to the supported component tree, and whole-page template selection,
 publishing, collaboration, and direct canvas resizing are not included.
 
-## 11. License
+## 12. License
 
 The project's license will be selected before public distribution.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { ComponentDefinition } from '@dsk/core';
 import type { RenderComponentProps } from '@dsk/react-renderer';
 

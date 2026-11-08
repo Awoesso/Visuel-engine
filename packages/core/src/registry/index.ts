@@ -42,10 +42,7 @@ export function getComponentDefinition(
 /**
  * Checks if a component type is registered.
  */
-export function isComponentRegistered(
-  registry: ComponentRegistry,
-  type: string,
-): boolean {
+export function isComponentRegistered(registry: ComponentRegistry, type: string): boolean {
   return registry.has(type);
 }
 

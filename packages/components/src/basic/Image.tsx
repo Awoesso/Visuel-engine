@@ -1,5 +1,5 @@
 import React from 'react';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { isSafeUrl, type ComponentDefinition } from '@dsk/core';
 import type { RenderComponentProps } from '@dsk/react-renderer';
 
@@ -16,15 +16,12 @@ export const ImagePropsSchema = z.object({
 export type ImageProps = z.infer<typeof ImagePropsSchema>;
 export type ImageInputProps = z.input<typeof ImagePropsSchema>;
 
-export const Image: React.FC<RenderComponentProps<ImageInputProps>> = ({
-  props,
-  style,
-}) => {
+export const Image: React.FC<RenderComponentProps<ImageInputProps>> = ({ props, style }) => {
   const safeProps = ImagePropsSchema.parse(props || {});
 
   // Reject dangerous src URLs or sanitized placeholder '#'
   const isRealSrc = Boolean(
-    safeProps.src && safeProps.src !== '#' && isSafeUrl(safeProps.src),
+    safeProps.src && safeProps.src !== '#' && isSafeUrl(safeProps.src, { allowDataImages: true }),
   );
   const safeSrc = isRealSrc ? safeProps.src : '';
 

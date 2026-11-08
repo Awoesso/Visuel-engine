@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  CURRENT_SCHEMA_VERSION,
-  PageDocumentSchema,
-  registerMigration,
-} from '@dsk/core';
+import { CURRENT_SCHEMA_VERSION, PageDocumentSchema, registerMigration } from '@dsk/core';
 import type { PageDocument } from '@dsk/core';
 import { initialDocument, useEditorStore } from '../store';
 import {
@@ -50,7 +46,10 @@ describe('editor document persistence', () => {
   it('debounces autosave and restores the complete nested document and properties', () => {
     const storage = new MemoryStorage();
     const states: SaveState[] = [];
-    const autosave = new DocumentAutosave(() => storage, (state) => states.push(state));
+    const autosave = new DocumentAutosave(
+      () => storage,
+      (state) => states.push(state),
+    );
     const document = editedDocument();
 
     autosave.schedule(document);
@@ -127,7 +126,10 @@ describe('editor document persistence', () => {
       },
     };
     const states: SaveState[] = [];
-    const autosave = new DocumentAutosave(() => quotaStorage, (state) => states.push(state));
+    const autosave = new DocumentAutosave(
+      () => quotaStorage,
+      (state) => states.push(state),
+    );
     autosave.schedule(editedDocument());
     vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS);
     expect(states.at(-1)?.status).toBe('error');
@@ -137,7 +139,10 @@ describe('editor document persistence', () => {
 
   it('does not autosave viewport changes and persists a reset to the demo document', () => {
     const storage = new MemoryStorage();
-    const autosave = new DocumentAutosave(() => storage, () => undefined);
+    const autosave = new DocumentAutosave(
+      () => storage,
+      () => undefined,
+    );
     const unsubscribe = useEditorStore.subscribe((state, previousState) => {
       scheduleDocumentChange(state, previousState, autosave);
     });

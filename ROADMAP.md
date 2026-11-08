@@ -273,8 +273,9 @@ Advanced template catalogs, extensive version history, complex subscription cont
 The core schemas, renderer, standard component registry, and initial editor are
 implemented. The editor supports browser-local autosave and restore, a
 document-backed Layers tree, nested selection, component duplication/deletion,
-constrained native drag-and-drop, responsive style overrides, and grouped
-undo/redo. Host-application persistence and the broader production editing
+constrained native drag-and-drop, responsive style overrides, grouped undo/redo,
+and a Sections library with ten responsive storefront blocks. Host-application
+persistence, an uploaded-asset library, and the broader production editing
 workflow remain incomplete.
 
 The next milestone is to complete interaction-level browser coverage, refine

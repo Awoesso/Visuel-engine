@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { SectionNodeSchema } from './node';
 import { ThemeTokensSchema } from './theme';
 
@@ -12,8 +12,16 @@ export const PageMetadataSchema = z.object({
   templateId: z.string().optional(),
   templateVersion: z.string().optional(),
   tags: z.array(z.string()).optional().default([]),
-  createdAt: z.string().datetime().optional().default(() => new Date().toISOString()),
-  updatedAt: z.string().datetime().optional().default(() => new Date().toISOString()),
+  createdAt: z
+    .string()
+    .datetime()
+    .optional()
+    .default(() => new Date().toISOString()),
+  updatedAt: z
+    .string()
+    .datetime()
+    .optional()
+    .default(() => new Date().toISOString()),
 });
 
 export const PageDocumentSchema = z.object({

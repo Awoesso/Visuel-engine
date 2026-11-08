@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  resolveResponsiveStyles,
-  elementStylesToCssProperties,
-} from '../utils/styleResolver';
+import { resolveResponsiveStyles, elementStylesToCssProperties } from '../utils/styleResolver';
 import type { ResponsiveStyles } from '@dsk/core';
 
 describe('styleResolver', () => {

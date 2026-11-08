@@ -1,5 +1,5 @@
 import React from 'react';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { ComponentDefinition } from '@dsk/core';
 import type { RenderComponentProps } from '@dsk/react-renderer';
 
@@ -37,10 +37,7 @@ const LINE_HEIGHT_MAP: Record<string, string> = {
   relaxed: '1.75',
 };
 
-export const Text: React.FC<RenderComponentProps<TextInputProps>> = ({
-  props,
-  style,
-}) => {
+export const Text: React.FC<RenderComponentProps<TextInputProps>> = ({ props, style }) => {
   const safeProps = TextPropsSchema.parse(props || {});
 
   return (

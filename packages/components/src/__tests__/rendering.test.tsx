@@ -98,10 +98,35 @@ describe('Component Rendering via PageRenderer', () => {
     expect(el.getAttribute('href')).toBe('#pricing-table');
   });
 
+  it('should not render browser-normalized backslash URLs as external links', () => {
+    const unsafeUrls = [
+      '/\\evil.example',
+      '\\\\evil.example',
+      '/%5cevil.example',
+      '/%5c%5cevil.example',
+      '/%2f%5cevil.example',
+      'https:\\\\evil.example',
+    ];
+    const doc = makeDoc(
+      unsafeUrls.map((url, index) => ({
+        id: `btn-open-redirect-${index}`,
+        type: 'core/button',
+        props: { label: `Unsafe relative URL ${index}`, url },
+      })),
+    );
+
+    render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
+
+    for (const index of unsafeUrls.keys()) {
+      const el = screen.getByText(`Unsafe relative URL ${index}`);
+      expect(el.tagName).toBe('BUTTON');
+      expect(el.getAttribute('href')).toBeNull();
+      expect(el.hasAttribute('disabled')).toBe(true);
+    }
+  });
+
   it('should render Button as <button> when url is missing', () => {
-    const doc = makeDoc([
-      { id: 'btn-no-url', type: 'core/button', props: { label: 'Click Me' } },
-    ]);
+    const doc = makeDoc([{ id: 'btn-no-url', type: 'core/button', props: { label: 'Click Me' } }]);
 
     render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
 
@@ -187,9 +212,7 @@ describe('Component Rendering via PageRenderer', () => {
   });
 
   it('should render Image placeholder when src is empty', () => {
-    const doc = makeDoc([
-      { id: 'img-empty', type: 'core/image', props: { alt: 'Missing image' } },
-    ]);
+    const doc = makeDoc([{ id: 'img-empty', type: 'core/image', props: { alt: 'Missing image' } }]);
 
     render(<PageRenderer document={doc} registry={defaultRendererRegistry} />);
 
@@ -236,9 +259,7 @@ describe('Component Rendering via PageRenderer', () => {
         id: 'container-1',
         type: 'core/container',
         props: { maxWidth: 'md', alignment: 'center' },
-        children: [
-          { id: 'inner-h', type: 'core/heading', props: { text: 'Inside Container' } },
-        ],
+        children: [{ id: 'inner-h', type: 'core/heading', props: { text: 'Inside Container' } }],
       },
     ]);
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { initialDocument, useEditorStore } from '../store';
+import { createDefaultComponentRegistry } from '../constants';
+import { createEditorStore, initialDocument, useEditorStore } from '../store';
 import { SECTION_PRESETS } from '@dsk/templates';
 import { validatePageDocument } from '@dsk/core';
 
@@ -20,13 +21,58 @@ function findTestNode(
 }
 
 function resetStore(): void {
-  useEditorStore
-    .getState()
-    .replaceDocument(JSON.parse(JSON.stringify(initialDocument)) as typeof initialDocument);
+  useEditorStore.getState().resetDemo();
 }
 
 describe('editor document actions', () => {
   beforeEach(resetStore);
+
+  it('creates independent stores with isolated documents, pages, selection, and history', () => {
+    const firstStore = createEditorStore();
+    const secondStore = createEditorStore({ document: initialDocument });
+    const initialTitle = secondStore.getState().document.metadata.title;
+
+    expect(firstStore.getState().document).not.toBe(secondStore.getState().document);
+
+    firstStore.getState().selectNode('demo-heading');
+    firstStore.getState().updateDocumentTitle('First instance');
+
+    expect(firstStore.getState().pastDocuments).toHaveLength(1);
+    expect(firstStore.getState().selectedNodeId).toBe('demo-heading');
+    expect(secondStore.getState().document.metadata.title).toBe(initialTitle);
+    expect(secondStore.getState().pastDocuments).toHaveLength(0);
+    expect(secondStore.getState().selectedNodeId).toBeNull();
+
+    firstStore.getState().undo();
+    expect(firstStore.getState().document.metadata.title).toBe(initialTitle);
+    expect(secondStore.getState().document.metadata.title).toBe(initialTitle);
+
+    firstStore.getState().createPage('First instance page');
+    expect(firstStore.getState().pages).toHaveLength(2);
+    expect(secondStore.getState().pages).toHaveLength(1);
+    expect(secondStore.getState().activePageId).toBe(initialDocument.id);
+  });
+
+  it('updates component definitions without replacing the document or its history', () => {
+    const registry = createDefaultComponentRegistry();
+    registry.delete('core/button');
+    const store = createEditorStore({ registry });
+
+    expect(() => store.getState().addComponent('core/button')).toThrow(
+      'Cannot add unregistered component "core/button".',
+    );
+
+    const document = store.getState().document;
+    store.getState().updateDocumentTitle('Keep this document');
+    const updatedDocument = store.getState().document;
+    store.getState().setComponentRegistry(createDefaultComponentRegistry());
+
+    expect(store.getState().document).toBe(updatedDocument);
+    expect(store.getState().document).not.toBe(document);
+    expect(store.getState().pastDocuments).toHaveLength(1);
+    store.getState().addComponent('core/button');
+    expect(store.getState().document.sections[0]?.children.at(-1)?.type).toBe('core/button');
+  });
 
   it('renames the document and supports undo and redo', () => {
     const originalTitle = useEditorStore.getState().document.metadata.title;
@@ -140,6 +186,21 @@ describe('editor document actions', () => {
     );
   });
 
+  it('rejects moving a node relative to one of its descendants without changing the document', () => {
+    const before = useEditorStore.getState().document;
+
+    expect(useEditorStore.getState().moveNode('demo-container', 'demo-heading', 'before')).toBe(
+      false,
+    );
+    expect(useEditorStore.getState().moveNode('demo-container', 'demo-heading', 'after')).toBe(
+      false,
+    );
+    expect(useEditorStore.getState().moveNode('demo-container', 'demo-heading', 'inside')).toBe(
+      false,
+    );
+    expect(useEditorStore.getState().document).toBe(before);
+  });
+
   it('groups property edits into one undo step and supports redo', () => {
     const store = useEditorStore.getState();
     store.updateNodeProps('demo-heading', { text: 'First edit' });
@@ -184,7 +245,7 @@ describe('editor document actions', () => {
   });
 
   it('adds a validated reusable section with fresh ids and selects its first node', () => {
-    const preset = SECTION_PRESETS[0];
+    const preset = SECTION_PRESETS.find((item) => item.id === 'hero');
     expect(preset).toBeDefined();
     useEditorStore.getState().addSection(preset!);
 
@@ -243,7 +304,7 @@ describe('editor document actions', () => {
   });
 
   it('reorders children within a Flex stack while preserving the original parent', () => {
-    useEditorStore.getState().addSection(SECTION_PRESETS[0]!);
+    useEditorStore.getState().addSection(SECTION_PRESETS.find((item) => item.id === 'hero')!);
     const section = useEditorStore.getState().document.sections.at(-1)!;
     const container = section.children[0]!;
     const stack = container.children[0]!;
@@ -317,5 +378,58 @@ describe('editor document actions', () => {
     state = useEditorStore.getState();
     expect(state.pages).toHaveLength(1);
     expect(state.deletePage(state.pages[0]!.id)).toBe(false);
+  });
+
+  it('creates and duplicates pages with unique IDs even across rapid successive operations', () => {
+    const originalPage = useEditorStore.getState().pages[0]!;
+    const createdIds = Array.from({ length: 5 }, (_, index) =>
+      useEditorStore.getState().createPage(`Rapid page ${index}`),
+    );
+
+    const duplicatedIds: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      expect(useEditorStore.getState().duplicatePage(originalPage.id)).toBe(true);
+      duplicatedIds.push(useEditorStore.getState().activePageId);
+    }
+
+    const state = useEditorStore.getState();
+    const pageIds = state.pages.map((page) => page.id);
+    expect(pageIds).toHaveLength(9);
+    expect(new Set(pageIds).size).toBe(pageIds.length);
+    expect(createdIds).toHaveLength(5);
+    expect(new Set([...createdIds, ...duplicatedIds, originalPage.id]).size).toBe(9);
+    expect(state.pages[0]).toBe(originalPage);
+    expect(state.activePageId).toBe(duplicatedIds[2]);
+    expect(state.document.id).toBe(state.activePageId);
+    expect(state.selectedNodeId).toBeNull();
+  });
+
+  it('deletes only the requested page and preserves the active page and selection', () => {
+    const originalPage = useEditorStore.getState().pages[0]!;
+    const store = useEditorStore.getState();
+    const activePageId = store.createPage('Active page');
+    const inactivePageId = useEditorStore.getState().createPage('Inactive page');
+
+    useEditorStore.getState().switchPage(activePageId);
+    useEditorStore.getState().selectNode('demo-heading');
+    const activeDocument = useEditorStore.getState().document;
+
+    expect(useEditorStore.getState().deletePage(inactivePageId)).toBe(true);
+
+    let state = useEditorStore.getState();
+    expect(state.pages.map((page) => page.id)).toEqual([originalPage.id, activePageId]);
+    expect(state.pages[0]).toBe(originalPage);
+    expect(state.document).toBe(activeDocument);
+    expect(state.activePageId).toBe(activePageId);
+    expect(state.selectedNodeId).toBe('demo-heading');
+
+    expect(state.deletePage(activePageId)).toBe(true);
+    state = useEditorStore.getState();
+    expect(state.pages).toEqual([originalPage]);
+    expect(state.pages[0]).toBe(originalPage);
+    expect(state.document).toBe(originalPage);
+    expect(state.activePageId).toBe(originalPage.id);
+    expect(state.selectedNodeId).toBeNull();
+    expect(state.deletePage(activePageId)).toBe(false);
   });
 });

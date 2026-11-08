@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { ResponsiveStylesSchema, type ResponsiveStyles } from './styles';
 
 const BaseComponentNodeSchema = z.object({

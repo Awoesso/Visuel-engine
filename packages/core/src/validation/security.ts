@@ -1,63 +1,62 @@
 import type { SectionNode } from '../schemas/node';
+import { MAX_DOCUMENT_SIZE } from '../constants';
 
-export const ALLOWED_PROTOCOLS = ['http:', 'https:', 'data:'] as const;
+export const ALLOWED_PROTOCOLS = ['http:', 'https:', 'mailto:', 'tel:'] as const;
 
 export const SECURITY_LIMITS = {
-  MAX_DOCUMENT_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB
+  MAX_DOCUMENT_SIZE_BYTES: MAX_DOCUMENT_SIZE,
   MAX_NODE_DEPTH: 20,
   MAX_TOTAL_NODES: 500,
   MAX_SECTIONS: 100,
 } as const;
 
+export interface SafeUrlOptions {
+  allowDataImages?: boolean;
+}
+
+const RELATIVE_URL_BASE = 'https://dsk.invalid';
+const ENCODED_AMBIGUOUS_CHARACTERS = /%(?:0[0-9a-f]|1[0-9a-f]|2f|5c|7f)/i;
+const INVALID_PERCENT_ENCODING = /%(?![0-9a-f]{2})/i;
+const SAFE_DATA_IMAGE_PREFIX = /^data:image\/(?:png|jpeg|gif|webp|avif);base64,/i;
+
 /**
  * Checks if a given URL is safe to render in href or src attributes.
- * Uses a positive allowlist of safe protocols (http, https, mailto, tel, safe data:image/)
- * and relative URLs, while strictly rejecting evasion techniques, control characters,
- * protocol-relative URLs (//), and dangerous schemes (javascript:, vbscript:, etc.).
+ * Allows HTTP(S), mailto/tel, same-origin relative URLs, and optionally raster data images.
+ * Ambiguous URL forms and unapproved schemes are rejected.
  */
-export function isSafeUrl(url: string | undefined | null): boolean {
+export function isSafeUrl(url: string | undefined | null, options: SafeUrlOptions = {}): boolean {
   if (!url) return true;
   const trimmed = url.trim();
   if (!trimmed) return true;
 
-  // Clean URL by stripping internal whitespace and control characters for scheme inspection
-  // eslint-disable-next-line no-control-regex
-  const clean = trimmed.replace(/[\u0000-\u001F\u007F-\u009F\s]+/g, '').toLowerCase();
-
-  // Reject null bytes, encoded null bytes, and HTML entity escapes
-  if (clean.includes('\0') || clean.includes('%00') || clean.includes('&#')) {
-    return false;
-  }
-
-  // Reject protocol-relative URLs (//attacker.com) to prevent open redirect vectors
-  if (clean.startsWith('//')) {
-    return false;
-  }
-
-  // Safe relative paths and internal hash anchors
   if (
-    clean.startsWith('/') ||
-    clean.startsWith('./') ||
-    clean.startsWith('../') ||
-    clean.startsWith('#')
+    /[\s\\\p{Cc}]/u.test(trimmed) ||
+    trimmed.includes('&#') ||
+    ENCODED_AMBIGUOUS_CHARACTERS.test(trimmed) ||
+    INVALID_PERCENT_ENCODING.test(trimmed)
   ) {
-    return true;
+    return false;
   }
 
-  // Safe data: URLs (images only)
-  if (clean.startsWith('data:')) {
-    return clean.startsWith('data:image/');
+  if (trimmed.startsWith('//')) {
+    return false;
   }
 
-  // Parse absolute URLs and enforce strict protocol allowlist
+  if (/^data:/i.test(trimmed)) {
+    return options.allowDataImages === true && SAFE_DATA_IMAGE_PREFIX.test(trimmed);
+  }
+
+  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(trimmed);
   try {
-    const parsed = new URL(trimmed);
-    const protocol = parsed.protocol.toLowerCase();
+    const parsed = new URL(trimmed, RELATIVE_URL_BASE);
+    if (!hasScheme) {
+      return parsed.origin === RELATIVE_URL_BASE;
+    }
+
     return (
-      protocol === 'http:' ||
-      protocol === 'https:' ||
-      protocol === 'mailto:' ||
-      protocol === 'tel:'
+      ALLOWED_PROTOCOLS.includes(parsed.protocol as (typeof ALLOWED_PROTOCOLS)[number]) &&
+      !parsed.username &&
+      !parsed.password
     );
   } catch {
     return false;
@@ -71,6 +70,7 @@ export function isSafeUrl(url: string | undefined | null): boolean {
  */
 export function sanitizePropsUrls(
   props: Record<string, unknown>,
+  options: SafeUrlOptions = {},
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = { ...props };
 
@@ -84,7 +84,7 @@ export function sanitizePropsUrls(
 
     if (typeof value === 'string') {
       if (isUrlKey) {
-        if (!isSafeUrl(value)) {
+        if (!isSafeUrl(value, options)) {
           sanitized[key] = '#';
         }
       }
@@ -92,16 +92,16 @@ export function sanitizePropsUrls(
       sanitized[key] = value.map((item) => {
         if (typeof item === 'string') {
           if (isUrlKey || item.trim().toLowerCase().startsWith('javascript:')) {
-            return isSafeUrl(item) ? item : '#';
+            return isSafeUrl(item, options) ? item : '#';
           }
           return item;
         } else if (item && typeof item === 'object') {
-          return sanitizePropsUrls(item as Record<string, unknown>);
+          return sanitizePropsUrls(item as Record<string, unknown>, options);
         }
         return item;
       });
     } else if (value && typeof value === 'object') {
-      sanitized[key] = sanitizePropsUrls(value as Record<string, unknown>);
+      sanitized[key] = sanitizePropsUrls(value as Record<string, unknown>, options);
     }
   }
 

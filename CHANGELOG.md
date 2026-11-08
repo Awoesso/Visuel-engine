@@ -7,6 +7,7 @@ This project follows the principles of Semantic Versioning once public package r
 ## [Unreleased]
 
 ### Planned
+
 - Initialize the pnpm monorepo.
 - Configure TypeScript and development tooling.
 - Define the core page document schema.
@@ -17,6 +18,7 @@ This project follows the principles of Semantic Versioning once public package r
 - Develop the visual editor MVP.
 
 ### Added
+
 - Initial project documentation.
 - Product design specification.
 - Technical architecture specification.

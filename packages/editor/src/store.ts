@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import type { StateCreator, StoreApi } from 'zustand/vanilla';
 import { produce } from 'immer';
 import {
   CURRENT_SCHEMA_VERSION,
@@ -7,8 +9,14 @@ import {
   validateComponentProps,
   validatePageDocument,
 } from '@dsk/core';
-import type { ComponentNode, ElementStyles, PageDocument, SectionNode } from '@dsk/core';
-import { getDefaultComponent } from './constants';
+import type {
+  ComponentNode,
+  ComponentRegistry,
+  ElementStyles,
+  PageDocument,
+  SectionNode,
+} from '@dsk/core';
+import { createDefaultComponentRegistry } from './constants';
 import type { SaveState } from './persistence';
 import type { SectionPreset } from '@dsk/templates';
 
@@ -123,7 +131,7 @@ export const initialDocument: PageDocument = PageDocumentSchema.parse({
   ],
 });
 
-interface EditorState {
+export interface EditorState {
   pages: PageDocument[];
   activePageId: string;
   document: PageDocument;
@@ -134,7 +142,7 @@ interface EditorState {
   pastDocuments: PageDocument[];
   futureDocuments: PageDocument[];
 }
-interface EditorActions {
+export interface EditorActions {
   createPage: (title?: string) => string;
   switchPage: (pageId: string) => boolean;
   duplicatePage: (pageId: string) => boolean;
@@ -170,12 +178,23 @@ interface EditorActions {
   replaceDocument: (document: PageDocument) => void;
   resetDemo: () => void;
   setSaveState: (saveState: SaveState) => void;
+  setComponentRegistry: (registry: ComponentRegistry) => void;
 }
 
-let nextNodeId = 0;
+export type EditorStore = EditorState & EditorActions;
+export type EditorStoreApi = StoreApi<EditorStore>;
+
+export interface EditorStoreOptions {
+  document?: PageDocument;
+  registry?: ComponentRegistry;
+}
+
+interface HistoryGroupState {
+  last: { key: string; timestamp: number } | null;
+}
+
 const HISTORY_LIMIT = 50;
 const HISTORY_GROUP_WINDOW_MS = 750;
-let lastHistoryGroup: { key: string; timestamp: number } | null = null;
 
 function findNode(nodes: ComponentNode[], nodeId: NodeId): ComponentNode | undefined {
   for (const node of nodes) {
@@ -259,45 +278,46 @@ function findNodeLocation(
   return undefined;
 }
 
-function isAllowedChild(parent: ComponentNode, childType: string): boolean {
-  const definition = getDefaultComponent(parent.type);
+function isAllowedChild(
+  parent: ComponentNode,
+  childType: string,
+  registry: ComponentRegistry,
+): boolean {
+  const definition = registry.get(parent.type);
   return Boolean(
     definition?.canHaveChildren &&
     (!definition.allowedChildren || definition.allowedChildren.includes(childType)),
   );
 }
 
-function cloneWithFreshIds(node: ComponentNode, document: PageDocument): ComponentNode {
-  let id: string;
-  do {
-    id = `editor-node-${++nextNodeId}`;
-  } while (containsNodeId(document, id));
-
+function cloneWithFreshIds(
+  node: ComponentNode,
+  document: PageDocument,
+  createNodeId: (document: PageDocument) => string,
+): ComponentNode {
   return {
     ...node,
-    id,
+    id: createNodeId(document),
     props: { ...node.props },
     styles: {
       desktop: { ...node.styles.desktop },
       tablet: { ...node.styles.tablet },
       mobile: { ...node.styles.mobile },
     },
-    children: node.children.map((child) => cloneWithFreshIds(child, document)),
+    children: node.children.map((child) => cloneWithFreshIds(child, document, createNodeId)),
   };
 }
 
 function createComponentNode(
   componentId: string,
   document: PageDocument,
+  createNodeId: (document: PageDocument) => string,
+  registry: ComponentRegistry,
 ): ComponentNode | undefined {
-  const definition = getDefaultComponent(componentId);
+  const definition = registry.get(componentId);
   if (!definition) return undefined;
-  let id: string;
-  do {
-    id = `editor-node-${++nextNodeId}`;
-  } while (containsNodeId(document, id));
   return {
-    id,
+    id: createNodeId(document),
     type: componentId,
     version: definition.version,
     props: { ...definition.defaultProps },
@@ -317,529 +337,608 @@ export function assertValidDocument(document: PageDocument): void {
   }
 }
 
-export const useEditorStore = create<EditorState & EditorActions>()((set, get) => ({
-  pages: [initialDocument],
-  activePageId: initialDocument.id,
-  document: initialDocument,
-  selectedNodeId: null,
-  viewport: 'desktop',
-  zoom: 0.5,
-  saveState: { status: 'idle', lastSavedAt: null, error: null },
-  pastDocuments: [],
-  futureDocuments: [],
-  createPage: (title) => {
-    const pageCount = get().pages.length + 1;
-    const pageTitle = title?.trim() || `Page ${pageCount}`;
-    const pageId = `page-${Date.now()}`;
-    const newPage: PageDocument = PageDocumentSchema.parse({
-      id: pageId,
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      metadata: {
-        title: pageTitle,
-        description: `Page ${pageTitle}`,
-        slug: `/${pageTitle.toLowerCase().replace(/\s+/g, '-')}`,
-      },
-      theme: {},
-      sections: [
-        {
-          id: `section-${Date.now()}`,
-          name: 'Section principale',
-          children: [],
-          locked: false,
-          hidden: false,
-        },
-      ],
-    });
-    set((state) => ({
-      pages: [...state.pages, newPage],
-      activePageId: newPage.id,
-      document: newPage,
-      selectedNodeId: null,
-      pastDocuments: [],
-      futureDocuments: [],
-    }));
-    return pageId;
-  },
-  switchPage: (pageId) => {
-    const targetPage = get().pages.find((p) => p.id === pageId);
-    if (!targetPage) return false;
-    set({
-      activePageId: targetPage.id,
-      document: targetPage,
-      selectedNodeId: null,
-      pastDocuments: [],
-      futureDocuments: [],
-    });
-    return true;
-  },
-  duplicatePage: (pageId) => {
-    const targetPage = get().pages.find((p) => p.id === pageId);
-    if (!targetPage) return false;
-    const newPageId = `page-${Date.now()}`;
-    const newTitle = `${targetPage.metadata.title} (Copie)`;
-    const duplicated: PageDocument = PageDocumentSchema.parse({
-      ...targetPage,
-      id: newPageId,
-      metadata: {
-        ...targetPage.metadata,
-        title: newTitle,
-        slug: `/${newTitle.toLowerCase().replace(/\s+/g, '-')}`,
-      },
-    });
-    set((state) => ({
-      pages: [...state.pages, duplicated],
-      activePageId: duplicated.id,
-      document: duplicated,
-      selectedNodeId: null,
-      pastDocuments: [],
-      futureDocuments: [],
-    }));
-    return true;
-  },
-  deletePage: (pageId) => {
-    const currentPages = get().pages;
-    if (currentPages.length <= 1) return false; // Ne pas supprimer la dernière page
-    const nextPages = currentPages.filter((p) => p.id !== pageId);
-    const activeId = get().activePageId;
-    let nextActivePage = get().document;
-    if (activeId === pageId) {
-      nextActivePage = nextPages[0]!;
-    }
-    set({
-      pages: nextPages,
-      activePageId: nextActivePage.id,
-      document: nextActivePage,
-      selectedNodeId: null,
-      pastDocuments: [],
-      futureDocuments: [],
-    });
-    return true;
-  },
-  renamePage: (pageId, title) => {
-    const trimmed = title.trim();
-    if (!trimmed) return false;
-    set((state) => {
-      const nextPages = state.pages.map((p) =>
-        p.id === pageId
-          ? { ...p, metadata: { ...p.metadata, title: trimmed } }
-          : p,
-      );
-      const isCurrent = state.activePageId === pageId;
-      return {
-        pages: nextPages,
-        document: isCurrent
-          ? { ...state.document, metadata: { ...state.document.metadata, title: trimmed } }
-          : state.document,
-      };
-    });
-    return true;
-  },
-  addComponent: (componentId) => {
-    const currentDocument = get().document;
-    const newNode = createComponentNode(componentId, currentDocument);
-    if (!newNode) {
-      throw new Error(`Cannot add unregistered component "${componentId}".`);
-    }
+function createEditorState(
+  options: EditorStoreOptions = {},
+): StateCreator<EditorStore, [], [], EditorStore> {
+  const initialPage = PageDocumentSchema.parse(options.document ?? initialDocument);
+  assertValidDocument(initialPage);
+  let componentRegistry = options.registry ?? createDefaultComponentRegistry();
+  let nextPageId = 0n;
+  let nextNodeId = 0;
+  const historyGroup: HistoryGroupState = { last: null };
 
-    const nodeId = newNode.id;
-    const selectedNodeId = get().selectedNodeId;
-    const selectedLocation =
-      selectedNodeId && !isNodeEffectivelyLocked(currentDocument, selectedNodeId)
-        ? findNodeLocation(currentDocument.sections, selectedNodeId)
-        : undefined;
-    const selected = selectedLocation?.list[selectedLocation.index];
-    const parentTarget = selected && isAllowedChild(selected, componentId) ? selected : undefined;
-    const destinationSection = currentDocument.sections.find((section) => !section.locked);
-    const destinationList = parentTarget
-      ? parentTarget.children
-      : (selectedLocation?.list ?? destinationSection?.children);
-    if (!destinationList) {
-      throw new Error('The editor document must contain a section before adding components.');
-    }
-    const destinationParent = parentTarget ?? selectedLocation?.parent ?? null;
-    if (destinationParent && !isAllowedChild(destinationParent, componentId)) {
-      throw new Error(
-        `Component "${componentId}" is not allowed inside "${destinationParent.type}".`,
-      );
-    }
-
-    const candidate = produce(currentDocument, (draft) => {
-      const list = parentTarget
-        ? findNode(
-            draft.sections.flatMap((section) => section.children),
-            parentTarget.id,
-          )?.children
-        : selectedLocation
-          ? findNodeLocation(draft.sections, selected?.id ?? '')?.list
-          : draft.sections.find((section) => section.id === destinationSection?.id)?.children;
-      if (!list) throw new Error('Unable to resolve the insertion point.');
-      if (parentTarget) {
-        list.push(newNode);
-      } else {
-        const index = selectedLocation
-          ? list.findIndex((node) => node.id === selected?.id) + 1
-          : list.length;
-        list.splice(index, 0, newNode);
-      }
-    });
-    commitDocument(set, candidate, nodeId);
-  },
-  addComponentAt: (componentId, targetId, position) => {
-    const current = get().document;
-    const newNode = createComponentNode(componentId, current);
-    const targetLocation = findNodeLocation(current.sections, targetId);
-    const target = targetLocation?.list[targetLocation.index];
-    if (!newNode || !target || !targetLocation) return false;
-    if (isNodeEffectivelyLocked(current, targetId)) return false;
-    const parent = position === 'inside' ? target : targetLocation.parent;
-    if (parent && !isAllowedChild(parent, componentId)) return false;
-    if (position === 'inside' && !getDefaultComponent(target.type)?.canHaveChildren) return false;
-
-    const candidate = produce(current, (draft) => {
-      if (position === 'inside') {
-        const destination = findNode(
-          draft.sections.flatMap((section) => section.children),
-          targetId,
-        );
-        destination?.children.push(newNode);
-        return;
-      }
-      const location = findNodeLocation(draft.sections, targetId);
-      if (!location) return;
-      const index = location.index + (position === 'after' ? 1 : 0);
-      location.list.splice(index, 0, newNode);
-    });
-    if (!validatePageDocument(candidate).success) return false;
-    commitDocument(set, candidate, newNode.id);
-    return true;
-  },
-  addComponentToSection: (componentId, sectionId) => {
-    const current = get().document;
-    const section = current.sections.find((candidate) => candidate.id === sectionId);
-    const newNode = createComponentNode(componentId, current);
-    if (!section || section.locked || !newNode) return false;
-    const candidate = produce(current, (draft) => {
-      draft.sections.find((candidate) => candidate.id === sectionId)?.children.push(newNode);
-    });
-    if (!validatePageDocument(candidate).success) return false;
-    commitDocument(set, candidate, newNode.id);
-    return true;
-  },
-  addSection: (preset) => {
-    const current = get().document;
-    let sectionId: string;
+  const createUniquePageId = (pages: readonly PageDocument[]): string => {
+    const existingIds = new Set(pages.map((page) => page.id));
+    let pageId: string;
     do {
-      sectionId = `editor-section-${++nextNodeId}`;
-    } while (containsNodeId(current, sectionId));
-    const section: SectionNode = {
-      ...preset.section,
-      id: sectionId,
-      children: preset.section.children.map((node) => cloneWithFreshIds(node, current)),
-      styles: {
-        desktop: { ...preset.section.styles.desktop },
-        tablet: { ...preset.section.styles.tablet },
-        mobile: { ...preset.section.styles.mobile },
-      },
-    };
-    const candidate = produce(current, (draft) => {
-      draft.sections.push(section);
-    });
-    commitDocument(set, candidate, section.children[0]?.id ?? null);
-  },
-  selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
-  updateNodeName: (nodeId, name) => {
-    const current = get().document;
-    if (isNodeEffectivelyLocked(current, nodeId)) return false;
-    const candidate = produce(current, (draft) => {
-      const node = draft.sections
-        .map((section) => findNode(section.children, nodeId))
-        .find((match) => match !== undefined);
-      if (!node) return;
-      const normalizedName = name.trim();
-      if (normalizedName) node.name = normalizedName;
-      else delete node.name;
-    });
-    if (candidate === current) return false;
-    commitDocument(set, candidate, get().selectedNodeId, `name:${nodeId}`, { skipFullValidation: true });
-    return true;
-  },
-  setNodeLocked: (nodeId, locked) => {
-    const current = get().document;
-    if (isNodeLockedByAncestor(current, nodeId)) return false;
-    const nodeExists = current.sections.some(
-      (section) => findNode(section.children, nodeId) !== undefined,
-    );
-    if (!nodeExists) return false;
-    const candidate = produce(current, (draft) => {
-      const node = draft.sections
-        .map((section) => findNode(section.children, nodeId))
-        .find((match) => match !== undefined);
-      if (node) node.locked = locked;
-    });
-    if (candidate === current) return true;
-    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
-    return true;
-  },
-  setNodeHidden: (nodeId, hidden) => {
-    const current = get().document;
-    if (isNodeLockedByAncestor(current, nodeId)) return false;
-    const nodeExists = current.sections.some(
-      (section) => findNode(section.children, nodeId) !== undefined,
-    );
-    if (!nodeExists) return false;
-    const candidate = produce(current, (draft) => {
-      const node = draft.sections
-        .map((section) => findNode(section.children, nodeId))
-        .find((match) => match !== undefined);
-      if (node) node.hidden = hidden;
-    });
-    if (candidate === current) return true;
-    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
-    return true;
-  },
-  updateSectionName: (sectionId, name) => {
-    const current = get().document;
-    const section = current.sections.find((candidate) => candidate.id === sectionId);
-    const normalizedName = name.trim();
-    if (!section || section.locked || !normalizedName) return false;
-    if (section.name === normalizedName) return true;
-    const candidate = produce(current, (draft) => {
-      const draftSection = draft.sections.find((item) => item.id === sectionId);
-      if (draftSection) draftSection.name = normalizedName;
-    });
-    commitDocument(set, candidate, get().selectedNodeId, `section-name:${sectionId}`, { skipFullValidation: true });
-    return true;
-  },
-  setSectionLocked: (sectionId, locked) => {
-    const current = get().document;
-    const section = current.sections.find((candidate) => candidate.id === sectionId);
-    if (!section) return false;
-    if (section.locked === locked) return true;
-    const candidate = produce(current, (draft) => {
-      const draftSection = draft.sections.find((item) => item.id === sectionId);
-      if (draftSection) draftSection.locked = locked;
-    });
-    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
-    return true;
-  },
-  setSectionHidden: (sectionId, hidden) => {
-    const current = get().document;
-    const section = current.sections.find((candidate) => candidate.id === sectionId);
-    if (!section) return false;
-    if (section.hidden === hidden) return true;
-    const candidate = produce(current, (draft) => {
-      const draftSection = draft.sections.find((item) => item.id === sectionId);
-      if (draftSection) draftSection.hidden = hidden;
-    });
-    commitDocument(set, candidate, get().selectedNodeId, undefined, { skipFullValidation: true });
-    return true;
-  },
-  updateNodeProps: (nodeId, props) => {
-    const current = get().document;
-    if (isNodeEffectivelyLocked(current, nodeId)) {
-      throw new Error(`Cannot update locked component "${nodeId}".`);
-    }
-    const node = current.sections
-      .map((section) => findNode(section.children, nodeId))
-      .find((match) => match !== undefined);
-    if (!node) return;
-    const definition = getDefaultComponent(node.type);
-    if (!definition) throw new Error(`Cannot update unregistered component "${node.type}".`);
-    const parsed = validateComponentProps(definition, { ...node.props, ...props });
-    if (!parsed.success) throw new Error(`Invalid properties: ${parsed.errors.join('; ')}`);
+      nextPageId += 1n;
+      pageId = `page-${nextPageId}`;
+    } while (existingIds.has(pageId));
+    return pageId;
+  };
 
-    const candidate = produce(current, (draft) => {
-      const draftNode = draft.sections
-        .map((section) => findNode(section.children, nodeId))
-        .find((match) => match !== undefined);
-      if (draftNode) draftNode.props = parsed.data;
-    });
-    commitDocument(set, candidate, nodeId, `props:${nodeId}`, { skipFullValidation: true });
-  },
-  updateNodeStyles: (nodeId, mode, styles) => {
-    const current = get().document;
-    if (isNodeEffectivelyLocked(current, nodeId)) {
-      throw new Error(`Cannot update styles for locked component "${nodeId}".`);
-    }
-    const candidate = produce(current, (draft) => {
-      const node = draft.sections
-        .map((section) => findNode(section.children, nodeId))
-        .find((match) => match !== undefined);
-      if (!node) return;
-      const nextStyles = { ...node.styles[mode], ...styles };
-      for (const key of Object.keys(styles) as (keyof ElementStyles)[]) {
-        if (styles[key] === '' || styles[key] === undefined) delete nextStyles[key];
-      }
-      node.styles[mode] = nextStyles;
-      const parsed = ResponsiveStylesSchema.safeParse(node.styles);
-      if (!parsed.success) throw new Error(`Invalid responsive styles: ${parsed.error.message}`);
-      node.styles = parsed.data;
-    });
-    if (candidate === current) return;
-    commitDocument(set, candidate, nodeId, `styles:${nodeId}`, { skipFullValidation: true });
-  },
-  deleteNode: (nodeId) => {
-    const current = get().document;
-    if (isNodeEffectivelyLocked(current, nodeId)) return false;
-    const location = findNodeLocation(current.sections, nodeId);
-    if (!location) return false;
-    const candidate = produce(current, (draft) => {
-      const draftLocation = findNodeLocation(draft.sections, nodeId);
-      if (draftLocation) draftLocation.list.splice(draftLocation.index, 1);
-    });
-    const selected = get().selectedNodeId;
-    const selectedWasDeleted =
-      selected === nodeId || (selected !== null && isDescendantOf(current, nodeId, selected));
-    commitDocument(set, candidate, selectedWasDeleted ? null : selected);
-    return true;
-  },
-  duplicateNode: (nodeId) => {
-    const current = get().document;
-    if (isNodeEffectivelyLocked(current, nodeId)) return false;
-    const location = findNodeLocation(current.sections, nodeId);
-    if (!location) return false;
-    const original = location.list[location.index];
-    if (!original) return false;
-    const duplicate = cloneWithFreshIds(original, current);
-    const candidate = produce(current, (draft) => {
-      const draftLocation = findNodeLocation(draft.sections, nodeId);
-      if (draftLocation) draftLocation.list.splice(draftLocation.index + 1, 0, duplicate);
-    });
-    commitDocument(set, candidate, duplicate.id);
-    return true;
-  },
-  moveNode: (nodeId, targetId, position) => {
-    if (nodeId === targetId) return false;
-    const current = get().document;
-    if (isNodeEffectivelyLocked(current, nodeId) || isNodeEffectivelyLocked(current, targetId)) {
-      return false;
-    }
-    if (position === 'inside' && isDescendantOf(current, nodeId, targetId)) return false;
-    const sourceLocation = findNodeLocation(current.sections, nodeId);
-    const targetLocation = findNodeLocation(current.sections, targetId);
-    const source = sourceLocation?.list[sourceLocation.index];
-    const target = targetLocation?.list[targetLocation.index];
-    if (!source || !target || !sourceLocation || !targetLocation) return false;
+  const createNodeId = (document: PageDocument, prefix = 'editor-node'): string => {
+    let nodeId: string;
+    do {
+      nodeId = `${prefix}-${++nextNodeId}`;
+    } while (containsNodeId(document, nodeId));
+    return nodeId;
+  };
 
-    const destinationParent = position === 'inside' ? target : targetLocation.parent;
-    if (destinationParent && !isAllowedChild(destinationParent, source.type)) return false;
-    if (position === 'inside' && !getDefaultComponent(target.type)?.canHaveChildren) return false;
-
-    const candidate = produce(current, (draft) => {
-      const draftSource = findNodeLocation(draft.sections, nodeId);
-      if (!draftSource) return;
-      const [moved] = draftSource.list.splice(draftSource.index, 1);
-      if (!moved) return;
-      if (position === 'inside') {
-        const destination = findNode(
-          draft.sections.flatMap((section) => section.children),
-          targetId,
-        );
-        destination?.children.push(moved);
-      } else {
-        const destination = findNodeLocation(draft.sections, targetId);
-        if (!destination) return;
-        const targetIndex = destination.list.findIndex((node) => node.id === targetId);
-        const insertIndex = targetIndex + (position === 'after' ? 1 : 0);
-        destination.list.splice(insertIndex, 0, moved);
-      }
-    });
-    if (!validatePageDocument(candidate).success) return false;
-    commitDocument(set, candidate, nodeId);
-    return true;
-  },
-  moveNodeToSection: (nodeId, sectionId) => {
-    const current = get().document;
-    const sourceLocation = findNodeLocation(current.sections, nodeId);
-    const section = current.sections.find((candidate) => candidate.id === sectionId);
-    if (!sourceLocation || !section || section.locked || isNodeEffectivelyLocked(current, nodeId))
-      return false;
-    const candidate = produce(current, (draft) => {
-      const location = findNodeLocation(draft.sections, nodeId);
-      const destination = draft.sections.find((candidate) => candidate.id === sectionId);
-      if (!location || !destination) return;
-      const [moved] = location.list.splice(location.index, 1);
-      if (moved) destination.children.push(moved);
-    });
-    if (!validatePageDocument(candidate).success) return false;
-    commitDocument(set, candidate, nodeId);
-    return true;
-  },
-  moveNodeBy: (nodeId, direction) => {
-    const current = get().document;
-    const location = findNodeLocation(current.sections, nodeId);
-    if (!location) return;
-    const target = location.list[location.index + direction];
-    if (target) get().moveNode(nodeId, target.id, direction < 0 ? 'before' : 'after');
-  },
-  undo: () => {
-    lastHistoryGroup = null;
-    set((state) => {
-      const previousDocument = state.pastDocuments.at(-1);
-      if (!previousDocument) return state;
-      return {
-        document: previousDocument,
-        selectedNodeId: null,
-        pastDocuments: state.pastDocuments.slice(0, -1),
-        futureDocuments: [state.document, ...state.futureDocuments].slice(0, HISTORY_LIMIT),
-      };
-    });
-  },
-  redo: () => {
-    lastHistoryGroup = null;
-    set((state) => {
-      const nextDocument = state.futureDocuments[0];
-      if (!nextDocument) return state;
-      return {
-        document: nextDocument,
-        selectedNodeId: null,
-        pastDocuments: [...state.pastDocuments, state.document].slice(-HISTORY_LIMIT),
-        futureDocuments: state.futureDocuments.slice(1),
-      };
-    });
-  },
-  updateDocumentTitle: (title) => {
-    const normalizedTitle = title.trim();
-    if (!normalizedTitle) {
-      throw new Error('Document title cannot be empty.');
-    }
-
-    const currentDocument = get().document;
-    if (currentDocument.metadata.title === normalizedTitle) return;
-    const candidate = PageDocumentSchema.parse({
-      ...currentDocument,
-      metadata: { ...currentDocument.metadata, title: normalizedTitle },
-    });
-    commitDocument(set, candidate, get().selectedNodeId, 'metadata:title', { skipFullValidation: true });
-  },
-  setViewport: (mode) => set({ viewport: mode }),
-  setZoom: (zoom) => set({ zoom: Math.min(1.5, Math.max(0.25, Math.round(zoom * 100) / 100)) }),
-  replaceDocument: (document) => {
-    assertValidDocument(document);
-    lastHistoryGroup = null;
-    set((state) => {
-      const pageIndex = state.pages.findIndex((p) => p.id === document.id);
-      const nextPages =
-        pageIndex >= 0
-          ? state.pages.map((p, idx) => (idx === pageIndex ? document : p))
-          : [document];
-      return {
-        pages: nextPages,
-        activePageId: document.id,
-        document,
+  return (set, get) => ({
+    pages: [initialPage],
+    activePageId: initialPage.id,
+    document: initialPage,
+    selectedNodeId: null,
+    viewport: 'desktop',
+    zoom: 0.5,
+    saveState: { status: 'idle', lastSavedAt: null, error: null },
+    pastDocuments: [],
+    futureDocuments: [],
+    setComponentRegistry: (registry) => {
+      componentRegistry = registry;
+    },
+    createPage: (title) => {
+      const pages = get().pages;
+      const pageCount = pages.length + 1;
+      const pageTitle = title?.trim() || `Page ${pageCount}`;
+      const pageId = createUniquePageId(pages);
+      const newPage: PageDocument = PageDocumentSchema.parse({
+        id: pageId,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        metadata: {
+          title: pageTitle,
+          description: `Page ${pageTitle}`,
+          slug: `/${pageTitle.toLowerCase().replace(/\s+/g, '-')}`,
+        },
+        theme: {},
+        sections: [
+          {
+            id: `section-${Date.now()}`,
+            name: 'Section principale',
+            children: [],
+            locked: false,
+            hidden: false,
+          },
+        ],
+      });
+      set((state) => ({
+        pages: [...state.pages, newPage],
+        activePageId: newPage.id,
+        document: newPage,
         selectedNodeId: null,
         pastDocuments: [],
         futureDocuments: [],
+      }));
+      return pageId;
+    },
+    switchPage: (pageId) => {
+      const targetPage = get().pages.find((p) => p.id === pageId);
+      if (!targetPage) return false;
+      set({
+        activePageId: targetPage.id,
+        document: targetPage,
+        selectedNodeId: null,
+        pastDocuments: [],
+        futureDocuments: [],
+      });
+      return true;
+    },
+    duplicatePage: (pageId) => {
+      const pages = get().pages;
+      const targetPage = pages.find((p) => p.id === pageId);
+      if (!targetPage) return false;
+      const newPageId = createUniquePageId(pages);
+      const newTitle = `${targetPage.metadata.title} (Copie)`;
+      const duplicated: PageDocument = PageDocumentSchema.parse({
+        ...targetPage,
+        id: newPageId,
+        metadata: {
+          ...targetPage.metadata,
+          title: newTitle,
+          slug: `/${newTitle.toLowerCase().replace(/\s+/g, '-')}`,
+        },
+      });
+      set((state) => ({
+        pages: [...state.pages, duplicated],
+        activePageId: duplicated.id,
+        document: duplicated,
+        selectedNodeId: null,
+        pastDocuments: [],
+        futureDocuments: [],
+      }));
+      return true;
+    },
+    deletePage: (pageId) => {
+      const state = get();
+      if (state.pages.length <= 1 || !state.pages.some((page) => page.id === pageId)) {
+        return false;
+      }
+
+      const nextPages = state.pages.filter((page) => page.id !== pageId);
+      const deletingActivePage = state.activePageId === pageId;
+      const nextActivePage = deletingActivePage ? nextPages[0]! : state.document;
+      set({
+        pages: nextPages,
+        activePageId: deletingActivePage ? nextActivePage.id : state.activePageId,
+        document: nextActivePage,
+        selectedNodeId: deletingActivePage ? null : state.selectedNodeId,
+        pastDocuments: [],
+        futureDocuments: [],
+      });
+      return true;
+    },
+    renamePage: (pageId, title) => {
+      const trimmed = title.trim();
+      if (!trimmed) return false;
+      set((state) => {
+        const nextPages = state.pages.map((p) =>
+          p.id === pageId ? { ...p, metadata: { ...p.metadata, title: trimmed } } : p,
+        );
+        const isCurrent = state.activePageId === pageId;
+        return {
+          pages: nextPages,
+          document: isCurrent
+            ? { ...state.document, metadata: { ...state.document.metadata, title: trimmed } }
+            : state.document,
+        };
+      });
+      return true;
+    },
+    addComponent: (componentId) => {
+      const currentDocument = get().document;
+      const newNode = createComponentNode(
+        componentId,
+        currentDocument,
+        createNodeId,
+        componentRegistry,
+      );
+      if (!newNode) {
+        throw new Error(`Cannot add unregistered component "${componentId}".`);
+      }
+
+      const nodeId = newNode.id;
+      const selectedNodeId = get().selectedNodeId;
+      const selectedLocation =
+        selectedNodeId && !isNodeEffectivelyLocked(currentDocument, selectedNodeId)
+          ? findNodeLocation(currentDocument.sections, selectedNodeId)
+          : undefined;
+      const selected = selectedLocation?.list[selectedLocation.index];
+      const parentTarget =
+        selected && isAllowedChild(selected, componentId, componentRegistry) ? selected : undefined;
+      const destinationSection = currentDocument.sections.find((section) => !section.locked);
+      const destinationList = parentTarget
+        ? parentTarget.children
+        : (selectedLocation?.list ?? destinationSection?.children);
+      if (!destinationList) {
+        throw new Error('The editor document must contain a section before adding components.');
+      }
+      const destinationParent = parentTarget ?? selectedLocation?.parent ?? null;
+      if (destinationParent && !isAllowedChild(destinationParent, componentId, componentRegistry)) {
+        throw new Error(
+          `Component "${componentId}" is not allowed inside "${destinationParent.type}".`,
+        );
+      }
+
+      const candidate = produce(currentDocument, (draft) => {
+        const list = parentTarget
+          ? findNode(
+              draft.sections.flatMap((section) => section.children),
+              parentTarget.id,
+            )?.children
+          : selectedLocation
+            ? findNodeLocation(draft.sections, selected?.id ?? '')?.list
+            : draft.sections.find((section) => section.id === destinationSection?.id)?.children;
+        if (!list) throw new Error('Unable to resolve the insertion point.');
+        if (parentTarget) {
+          list.push(newNode);
+        } else {
+          const index = selectedLocation
+            ? list.findIndex((node) => node.id === selected?.id) + 1
+            : list.length;
+          list.splice(index, 0, newNode);
+        }
+      });
+      commitForInstance(set, historyGroup, candidate, nodeId);
+    },
+    addComponentAt: (componentId, targetId, position) => {
+      const current = get().document;
+      const newNode = createComponentNode(componentId, current, createNodeId, componentRegistry);
+      const targetLocation = findNodeLocation(current.sections, targetId);
+      const target = targetLocation?.list[targetLocation.index];
+      if (!newNode || !target || !targetLocation) return false;
+      if (isNodeEffectivelyLocked(current, targetId)) return false;
+      const parent = position === 'inside' ? target : targetLocation.parent;
+      if (parent && !isAllowedChild(parent, componentId, componentRegistry)) return false;
+      if (position === 'inside' && !componentRegistry.get(target.type)?.canHaveChildren)
+        return false;
+
+      const candidate = produce(current, (draft) => {
+        if (position === 'inside') {
+          const destination = findNode(
+            draft.sections.flatMap((section) => section.children),
+            targetId,
+          );
+          destination?.children.push(newNode);
+          return;
+        }
+        const location = findNodeLocation(draft.sections, targetId);
+        if (!location) return;
+        const index = location.index + (position === 'after' ? 1 : 0);
+        location.list.splice(index, 0, newNode);
+      });
+      if (!validatePageDocument(candidate).success) return false;
+      commitForInstance(set, historyGroup, candidate, newNode.id);
+      return true;
+    },
+    addComponentToSection: (componentId, sectionId) => {
+      const current = get().document;
+      const section = current.sections.find((candidate) => candidate.id === sectionId);
+      const newNode = createComponentNode(componentId, current, createNodeId, componentRegistry);
+      if (!section || section.locked || !newNode) return false;
+      const candidate = produce(current, (draft) => {
+        draft.sections.find((candidate) => candidate.id === sectionId)?.children.push(newNode);
+      });
+      if (!validatePageDocument(candidate).success) return false;
+      commitForInstance(set, historyGroup, candidate, newNode.id);
+      return true;
+    },
+    addSection: (preset) => {
+      const current = get().document;
+      let sectionId: string;
+      sectionId = createNodeId(current, 'editor-section');
+      const section: SectionNode = {
+        ...preset.section,
+        id: sectionId,
+        children: preset.section.children.map((node) =>
+          cloneWithFreshIds(node, current, createNodeId),
+        ),
+        styles: {
+          desktop: { ...preset.section.styles.desktop },
+          tablet: { ...preset.section.styles.tablet },
+          mobile: { ...preset.section.styles.mobile },
+        },
       };
-    });
-  },
-  resetDemo: () => {
-    const candidate = PageDocumentSchema.parse(initialDocument);
-    assertValidDocument(candidate);
-    commitDocument(set, candidate, null);
-  },
-  setSaveState: (saveState) => set({ saveState }),
-}));
+      const candidate = produce(current, (draft) => {
+        draft.sections.push(section);
+      });
+      commitForInstance(set, historyGroup, candidate, section.children[0]?.id ?? null);
+    },
+    selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+    updateNodeName: (nodeId, name) => {
+      const current = get().document;
+      if (isNodeEffectivelyLocked(current, nodeId)) return false;
+      const candidate = produce(current, (draft) => {
+        const node = draft.sections
+          .map((section) => findNode(section.children, nodeId))
+          .find((match) => match !== undefined);
+        if (!node) return;
+        const normalizedName = name.trim();
+        if (normalizedName) node.name = normalizedName;
+        else delete node.name;
+      });
+      if (candidate === current) return false;
+      commitForInstance(set, historyGroup, candidate, get().selectedNodeId, `name:${nodeId}`, {
+        skipFullValidation: true,
+      });
+      return true;
+    },
+    setNodeLocked: (nodeId, locked) => {
+      const current = get().document;
+      if (isNodeLockedByAncestor(current, nodeId)) return false;
+      const nodeExists = current.sections.some(
+        (section) => findNode(section.children, nodeId) !== undefined,
+      );
+      if (!nodeExists) return false;
+      const candidate = produce(current, (draft) => {
+        const node = draft.sections
+          .map((section) => findNode(section.children, nodeId))
+          .find((match) => match !== undefined);
+        if (node) node.locked = locked;
+      });
+      if (candidate === current) return true;
+      commitForInstance(set, historyGroup, candidate, get().selectedNodeId, undefined, {
+        skipFullValidation: true,
+      });
+      return true;
+    },
+    setNodeHidden: (nodeId, hidden) => {
+      const current = get().document;
+      if (isNodeLockedByAncestor(current, nodeId)) return false;
+      const nodeExists = current.sections.some(
+        (section) => findNode(section.children, nodeId) !== undefined,
+      );
+      if (!nodeExists) return false;
+      const candidate = produce(current, (draft) => {
+        const node = draft.sections
+          .map((section) => findNode(section.children, nodeId))
+          .find((match) => match !== undefined);
+        if (node) node.hidden = hidden;
+      });
+      if (candidate === current) return true;
+      commitForInstance(set, historyGroup, candidate, get().selectedNodeId, undefined, {
+        skipFullValidation: true,
+      });
+      return true;
+    },
+    updateSectionName: (sectionId, name) => {
+      const current = get().document;
+      const section = current.sections.find((candidate) => candidate.id === sectionId);
+      const normalizedName = name.trim();
+      if (!section || section.locked || !normalizedName) return false;
+      if (section.name === normalizedName) return true;
+      const candidate = produce(current, (draft) => {
+        const draftSection = draft.sections.find((item) => item.id === sectionId);
+        if (draftSection) draftSection.name = normalizedName;
+      });
+      commitForInstance(
+        set,
+        historyGroup,
+        candidate,
+        get().selectedNodeId,
+        `section-name:${sectionId}`,
+        {
+          skipFullValidation: true,
+        },
+      );
+      return true;
+    },
+    setSectionLocked: (sectionId, locked) => {
+      const current = get().document;
+      const section = current.sections.find((candidate) => candidate.id === sectionId);
+      if (!section) return false;
+      if (section.locked === locked) return true;
+      const candidate = produce(current, (draft) => {
+        const draftSection = draft.sections.find((item) => item.id === sectionId);
+        if (draftSection) draftSection.locked = locked;
+      });
+      commitForInstance(set, historyGroup, candidate, get().selectedNodeId, undefined, {
+        skipFullValidation: true,
+      });
+      return true;
+    },
+    setSectionHidden: (sectionId, hidden) => {
+      const current = get().document;
+      const section = current.sections.find((candidate) => candidate.id === sectionId);
+      if (!section) return false;
+      if (section.hidden === hidden) return true;
+      const candidate = produce(current, (draft) => {
+        const draftSection = draft.sections.find((item) => item.id === sectionId);
+        if (draftSection) draftSection.hidden = hidden;
+      });
+      commitForInstance(set, historyGroup, candidate, get().selectedNodeId, undefined, {
+        skipFullValidation: true,
+      });
+      return true;
+    },
+    updateNodeProps: (nodeId, props) => {
+      const current = get().document;
+      if (isNodeEffectivelyLocked(current, nodeId)) {
+        throw new Error(`Cannot update locked component "${nodeId}".`);
+      }
+      const node = current.sections
+        .map((section) => findNode(section.children, nodeId))
+        .find((match) => match !== undefined);
+      if (!node) return;
+      const definition = componentRegistry.get(node.type);
+      if (!definition) throw new Error(`Cannot update unregistered component "${node.type}".`);
+      const parsed = validateComponentProps(definition, { ...node.props, ...props });
+      if (!parsed.success) throw new Error(`Invalid properties: ${parsed.errors.join('; ')}`);
+
+      const candidate = produce(current, (draft) => {
+        const draftNode = draft.sections
+          .map((section) => findNode(section.children, nodeId))
+          .find((match) => match !== undefined);
+        if (draftNode) draftNode.props = parsed.data;
+      });
+      commitForInstance(set, historyGroup, candidate, nodeId, `props:${nodeId}`, {
+        skipFullValidation: true,
+      });
+    },
+    updateNodeStyles: (nodeId, mode, styles) => {
+      const current = get().document;
+      if (isNodeEffectivelyLocked(current, nodeId)) {
+        throw new Error(`Cannot update styles for locked component "${nodeId}".`);
+      }
+      const candidate = produce(current, (draft) => {
+        const node = draft.sections
+          .map((section) => findNode(section.children, nodeId))
+          .find((match) => match !== undefined);
+        if (!node) return;
+        const nextStyles = { ...node.styles[mode], ...styles };
+        for (const key of Object.keys(styles) as (keyof ElementStyles)[]) {
+          if (styles[key] === '' || styles[key] === undefined) delete nextStyles[key];
+        }
+        node.styles[mode] = nextStyles;
+        const parsed = ResponsiveStylesSchema.safeParse(node.styles);
+        if (!parsed.success) throw new Error(`Invalid responsive styles: ${parsed.error.message}`);
+        node.styles = parsed.data;
+      });
+      if (candidate === current) return;
+      commitForInstance(set, historyGroup, candidate, nodeId, `styles:${nodeId}`, {
+        skipFullValidation: true,
+      });
+    },
+    deleteNode: (nodeId) => {
+      const current = get().document;
+      if (isNodeEffectivelyLocked(current, nodeId)) return false;
+      const location = findNodeLocation(current.sections, nodeId);
+      if (!location) return false;
+      const candidate = produce(current, (draft) => {
+        const draftLocation = findNodeLocation(draft.sections, nodeId);
+        if (draftLocation) draftLocation.list.splice(draftLocation.index, 1);
+      });
+      const selected = get().selectedNodeId;
+      const selectedWasDeleted =
+        selected === nodeId || (selected !== null && isDescendantOf(current, nodeId, selected));
+      commitForInstance(set, historyGroup, candidate, selectedWasDeleted ? null : selected);
+      return true;
+    },
+    duplicateNode: (nodeId) => {
+      const current = get().document;
+      if (isNodeEffectivelyLocked(current, nodeId)) return false;
+      const location = findNodeLocation(current.sections, nodeId);
+      if (!location) return false;
+      const original = location.list[location.index];
+      if (!original) return false;
+      const duplicate = cloneWithFreshIds(original, current, createNodeId);
+      const candidate = produce(current, (draft) => {
+        const draftLocation = findNodeLocation(draft.sections, nodeId);
+        if (draftLocation) draftLocation.list.splice(draftLocation.index + 1, 0, duplicate);
+      });
+      commitForInstance(set, historyGroup, candidate, duplicate.id);
+      return true;
+    },
+    moveNode: (nodeId, targetId, position) => {
+      if (nodeId === targetId) return false;
+      const current = get().document;
+      if (isNodeEffectivelyLocked(current, nodeId) || isNodeEffectivelyLocked(current, targetId)) {
+        return false;
+      }
+      if (isDescendantOf(current, nodeId, targetId)) return false;
+      const sourceLocation = findNodeLocation(current.sections, nodeId);
+      const targetLocation = findNodeLocation(current.sections, targetId);
+      const source = sourceLocation?.list[sourceLocation.index];
+      const target = targetLocation?.list[targetLocation.index];
+      if (!source || !target || !sourceLocation || !targetLocation) return false;
+
+      const destinationParent = position === 'inside' ? target : targetLocation.parent;
+      if (destinationParent && !isAllowedChild(destinationParent, source.type, componentRegistry))
+        return false;
+      if (position === 'inside' && !componentRegistry.get(target.type)?.canHaveChildren)
+        return false;
+
+      const candidate = produce(current, (draft) => {
+        const draftSource = findNodeLocation(draft.sections, nodeId);
+        if (!draftSource) return;
+        const [moved] = draftSource.list.splice(draftSource.index, 1);
+        if (!moved) return;
+        if (position === 'inside') {
+          const destination = findNode(
+            draft.sections.flatMap((section) => section.children),
+            targetId,
+          );
+          destination?.children.push(moved);
+        } else {
+          const destination = findNodeLocation(draft.sections, targetId);
+          if (!destination) return;
+          const targetIndex = destination.list.findIndex((node) => node.id === targetId);
+          const insertIndex = targetIndex + (position === 'after' ? 1 : 0);
+          destination.list.splice(insertIndex, 0, moved);
+        }
+      });
+      if (!validatePageDocument(candidate).success) return false;
+      commitForInstance(set, historyGroup, candidate, nodeId);
+      return true;
+    },
+    moveNodeToSection: (nodeId, sectionId) => {
+      const current = get().document;
+      const sourceLocation = findNodeLocation(current.sections, nodeId);
+      const section = current.sections.find((candidate) => candidate.id === sectionId);
+      if (!sourceLocation || !section || section.locked || isNodeEffectivelyLocked(current, nodeId))
+        return false;
+      const candidate = produce(current, (draft) => {
+        const location = findNodeLocation(draft.sections, nodeId);
+        const destination = draft.sections.find((candidate) => candidate.id === sectionId);
+        if (!location || !destination) return;
+        const [moved] = location.list.splice(location.index, 1);
+        if (moved) destination.children.push(moved);
+      });
+      if (!validatePageDocument(candidate).success) return false;
+      commitForInstance(set, historyGroup, candidate, nodeId);
+      return true;
+    },
+    moveNodeBy: (nodeId, direction) => {
+      const current = get().document;
+      const location = findNodeLocation(current.sections, nodeId);
+      if (!location) return;
+      const target = location.list[location.index + direction];
+      if (target) get().moveNode(nodeId, target.id, direction < 0 ? 'before' : 'after');
+    },
+    undo: () => {
+      historyGroup.last = null;
+      set((state) => {
+        const previousDocument = state.pastDocuments.at(-1);
+        if (!previousDocument) return state;
+        return {
+          document: previousDocument,
+          selectedNodeId: null,
+          pastDocuments: state.pastDocuments.slice(0, -1),
+          futureDocuments: [state.document, ...state.futureDocuments].slice(0, HISTORY_LIMIT),
+        };
+      });
+    },
+    redo: () => {
+      historyGroup.last = null;
+      set((state) => {
+        const nextDocument = state.futureDocuments[0];
+        if (!nextDocument) return state;
+        return {
+          document: nextDocument,
+          selectedNodeId: null,
+          pastDocuments: [...state.pastDocuments, state.document].slice(-HISTORY_LIMIT),
+          futureDocuments: state.futureDocuments.slice(1),
+        };
+      });
+    },
+    updateDocumentTitle: (title) => {
+      const normalizedTitle = title.trim();
+      if (!normalizedTitle) {
+        throw new Error('Document title cannot be empty.');
+      }
+
+      const currentDocument = get().document;
+      if (currentDocument.metadata.title === normalizedTitle) return;
+      const candidate = PageDocumentSchema.parse({
+        ...currentDocument,
+        metadata: { ...currentDocument.metadata, title: normalizedTitle },
+      });
+      commitForInstance(set, historyGroup, candidate, get().selectedNodeId, 'metadata:title', {
+        skipFullValidation: true,
+      });
+    },
+    setViewport: (mode) => set({ viewport: mode }),
+    setZoom: (zoom) => set({ zoom: Math.min(1.5, Math.max(0.25, Math.round(zoom * 100) / 100)) }),
+    replaceDocument: (document) => {
+      assertValidDocument(document);
+      historyGroup.last = null;
+      set((state) => {
+        const pageIndex = state.pages.findIndex((p) => p.id === document.id);
+        const nextPages =
+          pageIndex >= 0
+            ? state.pages.map((p, idx) => (idx === pageIndex ? document : p))
+            : [document];
+        return {
+          pages: nextPages,
+          activePageId: document.id,
+          document,
+          selectedNodeId: null,
+          pastDocuments: [],
+          futureDocuments: [],
+        };
+      });
+    },
+    resetDemo: () => {
+      const candidate = PageDocumentSchema.parse(initialDocument);
+      assertValidDocument(candidate);
+      set({
+        pages: [candidate],
+        activePageId: candidate.id,
+        document: candidate,
+        selectedNodeId: null,
+        pastDocuments: [],
+        futureDocuments: [],
+      });
+    },
+    setSaveState: (saveState) => set({ saveState }),
+  });
+}
+
+export function createEditorStore(options: EditorStoreOptions = {}): EditorStoreApi {
+  return createStore<EditorStore>()(createEditorState(options));
+}
+
+export const useEditorStore = create<EditorStore>()(createEditorState());
 
 export interface CommitOptions {
   skipFullValidation?: boolean;
@@ -855,6 +954,7 @@ export function commitDocument(
   selectedNodeId: NodeId | null,
   groupKey?: string,
   options?: CommitOptions,
+  historyGroup: HistoryGroupState = { last: null },
 ): void {
   if (!options?.skipFullValidation) {
     assertValidDocument(document);
@@ -863,9 +963,9 @@ export function commitDocument(
   set((state) => {
     const grouped =
       groupKey !== undefined &&
-      lastHistoryGroup?.key === groupKey &&
-      timestamp - lastHistoryGroup.timestamp <= HISTORY_GROUP_WINDOW_MS;
-    lastHistoryGroup = groupKey ? { key: groupKey, timestamp } : null;
+      historyGroup.last?.key === groupKey &&
+      timestamp - historyGroup.last.timestamp <= HISTORY_GROUP_WINDOW_MS;
+    historyGroup.last = groupKey ? { key: groupKey, timestamp } : null;
     const pageIndex = state.pages.findIndex(
       (p) => p.id === state.activePageId || p.id === document.id,
     );
@@ -884,6 +984,17 @@ export function commitDocument(
       futureDocuments: [],
     };
   });
+}
+
+function commitForInstance(
+  set: Parameters<typeof commitDocument>[0],
+  historyGroup: HistoryGroupState,
+  document: PageDocument,
+  selectedNodeId: NodeId | null,
+  groupKey?: string,
+  options?: CommitOptions,
+): void {
+  commitDocument(set, document, selectedNodeId, groupKey, options, historyGroup);
 }
 
 function isDescendantOf(document: PageDocument, ancestorId: string, candidateId: string): boolean {

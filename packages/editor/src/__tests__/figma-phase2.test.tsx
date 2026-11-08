@@ -4,7 +4,27 @@ import { FillEditor } from '../components/ui/FillEditor';
 import { SpacingBox } from '../components/ui/SpacingBox';
 import { PropertyPanel } from '../components/PropertyPanel';
 import { ComponentSidebar, getNodeIcon } from '../components/ComponentSidebar';
+import { EditorConfigurationProvider, EditorStoreProvider } from '../EditorStoreContext';
+import { DEFAULT_EDITOR_OPTIONS } from '../config';
+import { defaultEditorRegistry } from '../constants';
 import { useEditorStore } from '../store';
+
+function renderWithEditorContext(element: React.ReactNode): string {
+  return renderToStaticMarkup(
+    <EditorStoreProvider store={useEditorStore}>
+      <EditorConfigurationProvider
+        configuration={{
+          registry: defaultEditorRegistry,
+          theme: undefined,
+          options: DEFAULT_EDITOR_OPTIONS,
+          callbacks: {},
+        }}
+      >
+        {element}
+      </EditorConfigurationProvider>
+    </EditorStoreProvider>,
+  );
+}
 
 describe('Phase 2 — Figma UI & Filling System', () => {
   beforeEach(() => {
@@ -12,10 +32,7 @@ describe('Phase 2 — Figma UI & Filling System', () => {
   });
   it('renders FillEditor with solid color swatch and hex representation', () => {
     const markup = renderToStaticMarkup(
-      <FillEditor
-        styles={{ backgroundColor: '#0d99ff', opacity: 0.8 }}
-        onChange={() => {}}
-      />
+      <FillEditor styles={{ backgroundColor: '#0d99ff', opacity: 0.8 }} onChange={() => {}} />,
     );
     expect(markup).toContain('Fill');
     expect(markup).toContain('0D99FF');
@@ -28,7 +45,7 @@ describe('Phase 2 — Figma UI & Filling System', () => {
       <FillEditor
         styles={{ backgroundImage: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)' }}
         onChange={() => {}}
-      />
+      />,
     );
     expect(gradientMarkup).toContain('Dégradé');
 
@@ -36,7 +53,7 @@ describe('Phase 2 — Figma UI & Filling System', () => {
       <FillEditor
         styles={{ backgroundImage: 'url("https://example.com/test.jpg")', backgroundSize: 'cover' }}
         onChange={() => {}}
-      />
+      />,
     );
     expect(imageMarkup).toContain('Image');
   });
@@ -50,7 +67,7 @@ describe('Phase 2 — Figma UI & Filling System', () => {
         bottom="16px"
         left="16px"
         onChange={() => {}}
-      />
+      />,
     );
     expect(markup).toContain('Padding');
     expect(markup).toContain('16');
@@ -73,9 +90,7 @@ describe('Phase 2 — Figma UI & Filling System', () => {
   });
 
   it('renders ComponentSidebar with Pages section and Layers tree', () => {
-    const markup = renderToStaticMarkup(
-      <ComponentSidebar />
-    );
+    const markup = renderWithEditorContext(<ComponentSidebar />);
     expect(markup).toContain('Pages');
     expect(markup).toContain('Layers');
     expect(markup).toContain('Components');
@@ -83,18 +98,14 @@ describe('Phase 2 — Figma UI & Filling System', () => {
 
   it('renders PropertyPanel in empty state when no element is selected', () => {
     useEditorStore.getState().selectNode(null);
-    const markup = renderToStaticMarkup(
-      <PropertyPanel />
-    );
+    const markup = renderWithEditorContext(<PropertyPanel />);
     expect(markup).toContain('Design');
     expect(markup).toContain('Prototype');
     expect(markup).toContain('Aucun élément sélectionné');
   });
 
   it('renders PropertyPanel with contextual sections when an element is selected', () => {
-    const markup = renderToStaticMarkup(
-      <PropertyPanel selectedNodeId="demo-container" />
-    );
+    const markup = renderWithEditorContext(<PropertyPanel selectedNodeId="demo-container" />);
     expect(markup).toContain('Position');
     expect(markup).toContain('Appearance');
     expect(markup).toContain('Fill');

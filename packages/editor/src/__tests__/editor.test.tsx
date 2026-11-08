@@ -112,6 +112,21 @@ describe('editor demo document', () => {
   });
 
   it('includes every reusable section preset with valid renderer component identifiers', () => {
+    expect(SECTION_PRESETS.map((preset) => preset.id)).toEqual(
+      expect.arrayContaining([
+        'header',
+        'hero',
+        'hero-editorial',
+        'feature-grid',
+        'product-collection',
+        'testimonials',
+        'faq',
+        'newsletter',
+        'call-to-action',
+        'footer',
+      ]),
+    );
+
     for (const preset of SECTION_PRESETS) {
       const doc = PageDocumentSchema.parse({
         ...initialDocument,
@@ -126,6 +141,15 @@ describe('editor demo document', () => {
           defaultRendererRegistry[type],
           `${preset.name} uses registered ${type}`,
         ).toBeDefined();
+      }
+
+      for (const viewport of ['desktop', 'tablet', 'mobile'] as const) {
+        const markup = renderToStaticMarkup(
+          <PageRenderer document={doc} registry={defaultRendererRegistry} viewport={viewport} />,
+        );
+        expect(markup, `${preset.name} should render on ${viewport}`).not.toContain(
+          'data-dsk-unknown-node',
+        );
       }
     }
   });

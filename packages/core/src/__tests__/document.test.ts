@@ -97,7 +97,9 @@ describe('validatePageDocument', () => {
     const result = validatePageDocument(docWithDuplicates);
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.errors.some((e) => e.message.includes('Duplicate node ID detected'))).toBe(true);
+      expect(result.errors.some((e) => e.message.includes('Duplicate node ID detected'))).toBe(
+        true,
+      );
     }
   });
 });
