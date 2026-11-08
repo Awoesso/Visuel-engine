@@ -235,7 +235,7 @@ export function isNodeEffectivelyLocked(document: PageDocument, nodeId: NodeId):
     const lockState = findNodeLockState(candidate.children, nodeId, candidate.locked);
     if (lockState) return lockState.locked || lockState.inheritedLocked;
   }
-  return false;
+  return false ;
 }
 
 function isNodeLockedByAncestor(document: PageDocument, nodeId: NodeId): boolean {
